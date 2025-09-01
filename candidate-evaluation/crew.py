@@ -26,10 +26,10 @@ def create_data_processing_crew():
     
     # Crear crew
     crew = Crew(
-        agents=[extractor_agent, analyzer_agent, processor_agent],
-        tasks=[extraction_task, analysis_task, processing_task],
+        agents=[extractor_agent, analyzer_agent, processor_agent], # analyzer_agent, processor_agent
+        tasks=[extraction_task, analysis_task, processing_task], # analysis_task, processing_task
         process=Process.sequential,
-        verbose=2
+        verbose=True
     )
     
     return crew

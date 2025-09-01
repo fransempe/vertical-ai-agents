@@ -7,13 +7,13 @@ def create_extraction_task(agent):
         Extraer todas las conversaciones de la base de datos Supabase.
         Incluir información relacionada de candidatos y meets usando los campos:
         - candidate_id para enlazar con tabla candidates
-        - meet_id para enlazar con tabla meet
+        - meet_id para enlazar con tabla meets
         
         Asegurar que cada registro incluya:
         - ID de conversación
         - Datos JSON de conversation_data
         - Nombre del candidato
-        - Título del meet
+        - ID de meet
         """,
         expected_output="Lista JSON de conversaciones con toda la información relacionada",
         agent=agent
