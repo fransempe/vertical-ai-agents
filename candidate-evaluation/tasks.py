@@ -29,8 +29,10 @@ def create_analysis_task(agent, extraction_task):
         1. Sentimientos predominantes
         2. Temas principales discutidos
         3. Conclusiones importantes
-        4. Puntos de acción si los hay
-        5. Calidad de la conversación (escala 1-10)
+        4. Calidad de la conversación (escala 1-10)
+        5. Habilidades blandas
+        6. Puntaje de evaluación de las respuestas a las preguntas técnicas (escala 1-10)
+        7. Sugerencia de que te pareció el candidato para el puesto requerido
         
         Proporcionar el análisis en formato JSON estructurado.
         """,
@@ -56,6 +58,10 @@ def create_processing_task(agent, extraction_task, analysis_task):
         - Distribución por candidatos
         - Distribución por meets
         - Promedio de calidad de conversaciones
+        - Promedio de puntaje de evaluación de las respuestas a las preguntas técnicas
+        - Promedio de puntaje de evaluación de la conversación
+        - Promedio de sugerencia de que te pareció el candidato para el puesto requerido
+        
         """,
         expected_output="Reporte final completo con datos procesados y estadísticas",
         agent=agent,

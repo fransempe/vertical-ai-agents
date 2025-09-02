@@ -41,6 +41,7 @@ def create_conversation_analyzer_agent():
         y una sugerencia de que te pareció el candidato, para el puesto requerido.
         Tener en cuenta que el campo conversation_data es un objeto con el contenido de la conversación entre
         el user y el agente de voz (AI). El agente AI es quien hace las preguntas y el user es quien responde.""",
+        """,
         verbose=True,
         llm=llm
     )

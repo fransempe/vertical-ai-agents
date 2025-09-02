@@ -213,3 +213,5 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+*conversation_results*.json
+*conversation_results*.txt
