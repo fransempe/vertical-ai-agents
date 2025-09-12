@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(/C:\\projects\\vertical-ai-agents\\agents\\candidate-evaluation/**)",
+      "Read(/C:\\projects\\vertical-ai-agents\\agents\\candidate-evaluation/**)",
+      "Read(/C:\\projects\\vertical-ai-agents\\agents\\candidate-evaluation/**)",
+      "Read(/C:\\projects\\vertical-ai-agents\\agents\\candidate-evaluation\\tools/**)",
+      "Read(/C:\\projects\\vertical-ai-agents\\agents\\candidate-evaluation/**)",
+      "Read(/C:\\projects\\vertical-ai-agents\\agents\\candidate-evaluation/**)",
+      "Read(/C:\\projects\\vertical-ai-agents\\agents\\candidate-evaluation/**)",
+      "Read(/C:\\projects\\vertical-ai-agents\\agents\\candidate-evaluation/**)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

@@ -213,32 +213,37 @@ def create_email_sending_task(agent, processing_task):
     """Tarea de envío de email con resultados"""
     return Task(
         description="""
-        Enviar por email TODO EL CONTENIDO COMPLETO de la evaluación de candidatos en formato de texto legible.
+        Enviar UN ÚNICO email con todo el contenido de la evaluación de candidatos en formato de texto legible.
         
-        Tomar TODOS los resultados del procesamiento final y crear un email que contenga:
+        IMPORTANTE: Enviar SOLAMENTE UN EMAIL. No enviar múltiples emails ni duplicados.
         
-        1. Asunto del email: "Reporte de Evaluación de Candidatos - [Fecha]"
+        Tomar todos los resultados del procesamiento final y crear UN ÚNICO email que contenga:
         
-        2. Cuerpo del email debe incluir TODA LA EVALUACIÓN COMPLETA en texto legible:
-           - TODOS los datos de cada conversación procesada
-           - TODOS los análisis detallados de cada candidato
-           - TODAS las evaluaciones de habilidades blandas con puntajes
-           - TODOS los análisis técnicos y de personalidad
-           - TODAS las recomendaciones y justificaciones
-           - TODAS las comparaciones con job descriptions
-           - TODAS las estadísticas y métricas calculadas
+        1. Asunto del email: "Reporte de Evaluación de Candidatos - 04/09/2025"
+        
+        2. Cuerpo del email debe incluir la evaluación completa en texto legible:
+           - Todos los datos de cada conversación procesada
+           - Análisis detallados de cada candidato
+           - Evaluaciones de habilidades blandas con puntajes
+           - Análisis técnicos y de personalidad
+           - Recomendaciones y justificaciones
+           - Comparaciones con job descriptions
+           - Estadísticas y métricas calculadas
            - Ranking completo de candidatos
            
         3. Formato del email:
            - Texto plano y legible, NO JSON
            - Estructurado con títulos y secciones claras
-           - Incluir TODOS los detalles del procesamiento
+           - Incluir todos los detalles del procesamiento
            - Fácil de leer y comprender
            
-        4. IMPORTANTE: El email debe contener la evaluación COMPLETA, no solo un resumen.
-           Incluir TODOS los datos procesados de forma detallada y estructurada.
+        4. PROCESO: 
+           - Preparar TODO el contenido en un solo email
+           - Enviar UNA SOLA VEZ usando la función send_evaluation_email
+           - Verificar que el email fue enviado exitosamente
+           - Retornar confirmación del envío
         
-        5. Después de enviar, retornar una copia exacta del email completo enviado.
+        5. RESTRICCIÓN CRÍTICA: Solo usar la función send_evaluation_email UNA VEZ por ejecución.
         
         El email debe ser enviado a francisco.sempe@flockit.com.ar usando la API configurada.
         """,

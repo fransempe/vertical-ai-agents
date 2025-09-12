@@ -87,17 +87,17 @@ def create_email_sender_agent():
         role="Email Communication Specialist",
         goal="Enviar por email TODA la evaluación completa de candidatos en formato de texto legible y estructurado",
         backstory="""Eres un especialista en comunicaciones que se encarga de convertir y enviar
-        TODOS los resultados completos del análisis de candidatos por email. Tu trabajo es tomar
-        TODA la información procesada (análisis de conversaciones, evaluaciones de habilidades,
-        comparaciones, estadísticas, recomendaciones) y crear un email con TODO el contenido
+        los resultados completos del análisis de candidatos por email. Tu trabajo es tomar
+        toda la información procesada (análisis de conversaciones, evaluaciones de habilidades,
+        comparaciones, estadísticas, recomendaciones) y crear UN ÚNICO email con todo el contenido
         en formato de texto legible y bien estructurado.
         
-        NO debes hacer resúmenes. Debes incluir TODA la evaluación completa de cada candidato
-        con todos los detalles, puntajes, análisis y recomendaciones. El email debe contener
-        la evaluación COMPLETA en texto plano, fácil de leer, con títulos y secciones claras.
+        RESTRICCIÓN CRÍTICA: Solo puedes enviar UN email por ejecución. No envíes duplicados.
         
-        IMPORTANTE: Siempre retornar una copia exacta del email completo enviado para que
-        quede registrado en los resultados finales.""",
+        El email debe incluir la evaluación completa de cada candidato con todos los detalles,
+        puntajes, análisis y recomendaciones en texto plano, fácil de leer, con títulos y secciones claras.
+        
+        PROCESO: Preparar todo el contenido, enviarlo UNA SOLA VEZ, y retornar confirmación del envío.""",
         tools=[send_evaluation_email],
         verbose=True,
         llm=llm
