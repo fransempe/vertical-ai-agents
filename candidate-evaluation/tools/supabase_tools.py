@@ -184,7 +184,7 @@ def send_evaluation_email(subject: str, body: str) -> str:
         evaluation_logger.log_task_progress("Envío de Email", f"Preparando email: {subject}")
         
         email_api_url = os.getenv("EMAIL_API_URL", "http://127.0.0.1:8004/send-simple-email")
-        to_email = "francisco.sempe@flockit.com.ar"
+        to_email = "flocklab.id@gmail.com"
         
         payload = {
             "to_email": to_email,
@@ -214,7 +214,7 @@ def send_evaluation_email(subject: str, body: str) -> str:
         }, indent=2)
         
     except requests.exceptions.RequestException as e:
-        evaluation_logger.log_email_sent("francisco.sempe@flockit.com.ar", subject, f"error: {str(e)}")
+        evaluation_logger.log_email_sent("flocklab.id@gmail.com", subject, f"error: {str(e)}")
         evaluation_logger.log_error("Envío de Email", f"Error de petición: {str(e)}")
         return json.dumps({
             "status": "error",
