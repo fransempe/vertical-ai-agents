@@ -72,8 +72,22 @@ async def trigger_analysis():
         
         # Preparar el resultado para retornar
         try:
-            result_dict = json.loads(str(result)) if isinstance(result, str) else result
-        except (json.JSONDecodeError, TypeError):
+            # Si es un CrewOutput, extraer su contenido
+            if hasattr(result, 'raw'):
+                try:
+                    # Intentar parsear el raw como JSON
+                    result_dict = json.loads(result.raw)
+                except json.JSONDecodeError:
+                    # Si no es JSON válido, crear un dict con el contenido raw
+                    result_dict = {"raw_result": result.raw}
+            else:
+                # Si no es CrewOutput, intentar convertir a dict
+                try:
+                    result_dict = json.loads(str(result))
+                except json.JSONDecodeError:
+                    result_dict = {"raw_result": str(result)}
+        except Exception:
+            # Fallback en caso de cualquier error
             result_dict = {"raw_result": str(result)}
 
         return AnalysisResponse(

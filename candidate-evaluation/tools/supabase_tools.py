@@ -1,6 +1,7 @@
 import os
 import json
 import requests
+import time
 from typing import List, Dict, Any
 from crewai.tools import tool
 from supabase import create_client, Client
@@ -10,6 +11,46 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from utils.logger import evaluation_logger
 
 load_dotenv()
+
+def _fetch_url_with_retries(url: str, max_retries: int = 3) -> requests.Response:
+    """
+    Función auxiliar para hacer fetch de URLs con reintentos limitados
+    
+    Args:
+        url: URL a obtener
+        max_retries: Número máximo de reintentos
+        
+    Returns:
+        Response object de requests
+    """
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Accept-Encoding': 'gzip, deflate',
+        'Connection': 'keep-alive',
+    }
+    
+    session = requests.Session()
+    session.headers.update(headers)
+    
+    for attempt in range(max_retries):
+        try:
+            response = session.get(url, timeout=10, allow_redirects=True)
+            response.raise_for_status()
+            return response
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+            if attempt < max_retries - 1:
+                wait_time = 2 ** attempt  # Backoff exponencial: 1s, 2s, 4s
+                evaluation_logger.log_task_progress("Análisis Job Description", f"Reintento {attempt + 1}/{max_retries} en {wait_time}s...")
+                time.sleep(wait_time)
+                continue
+            else:
+                raise e
+        except requests.exceptions.RequestException as e:
+            raise e
+    
+    raise requests.exceptions.RequestException("Máximo número de reintentos alcanzado")
 
 class SupabaseExtractorTool:
     def __init__(self):
@@ -72,7 +113,7 @@ def fetch_job_description(job_description: str) -> str:
     Obtiene la descripción del trabajo desde el campo job_description de la tabla meets.
     
     Args:
-        job_description: Descripción del trabajo
+        job_description: URL de la descripción del trabajo
         
     Returns:
         JSON string con el contenido de la descripción del trabajo
@@ -81,16 +122,24 @@ def fetch_job_description(job_description: str) -> str:
         evaluation_logger.log_task_start("Análisis Job Description", "Job Description Analyzer")
         evaluation_logger.log_task_progress("Análisis Job Description", f"Obteniendo contenido desde: {job_description}")
         
+        # Validar URL
         if not job_description or not job_description.strip():
             evaluation_logger.log_error("Análisis Job Description", "URL vacía o inválida")
-            return json.dumps({"error": "job_description vacía o inválida"}, indent=2)
-            
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        }
+            return json.dumps({"error": "job_description vacía o inválida", "success": False}, indent=2)
         
-        response = requests.get(job_description, headers=headers, timeout=30)
-        response.raise_for_status()
+        # Verificar que sea una URL válida
+        if not job_description.startswith(('http://', 'https://')):
+            evaluation_logger.log_error("Análisis Job Description", "URL no válida - debe empezar con http:// o https://")
+            return json.dumps({"error": "URL no válida - debe empezar con http:// o https://", "success": False}, indent=2)
+        
+        # Usar la función auxiliar con reintentos limitados
+        response = _fetch_url_with_retries(job_description, max_retries=3)
+        
+        # Verificar que el contenido sea HTML/texto
+        content_type = response.headers.get('content-type', '').lower()
+        if 'text/html' not in content_type and 'text/plain' not in content_type:
+            evaluation_logger.log_error("Análisis Job Description", f"Tipo de contenido no soportado: {content_type}")
+            return json.dumps({"error": f"Tipo de contenido no soportado: {content_type}", "success": False}, indent=2)
         
         evaluation_logger.log_task_complete("Análisis Job Description", f"Contenido obtenido exitosamente, {len(response.text)} caracteres")
         
@@ -98,15 +147,25 @@ def fetch_job_description(job_description: str) -> str:
             "job_description": job_description,
             "content": response.text,
             "status_code": response.status_code,
-            "content_type": response.headers.get('content-type', '')
+            "content_type": response.headers.get('content-type', ''),
+            "success": True
         }, indent=2)
         
+    except requests.exceptions.Timeout:
+        evaluation_logger.log_error("Análisis Job Description", "Timeout - la URL tardó demasiado en responder")
+        return json.dumps({"error": "Timeout - la URL tardó demasiado en responder", "success": False}, indent=2)
+    except requests.exceptions.ConnectionError:
+        evaluation_logger.log_error("Análisis Job Description", "Error de conexión - no se pudo conectar a la URL")
+        return json.dumps({"error": "Error de conexión - no se pudo conectar a la URL", "success": False}, indent=2)
+    except requests.exceptions.HTTPError as e:
+        evaluation_logger.log_error("Análisis Job Description", f"Error HTTP {e.response.status_code}: {str(e)}")
+        return json.dumps({"error": f"Error HTTP {e.response.status_code}: {str(e)}", "success": False}, indent=2)
     except requests.exceptions.RequestException as e:
         evaluation_logger.log_error("Análisis Job Description", f"Error de petición: {str(e)}")
-        return json.dumps({"error": f"Error fetching job description: {str(e)}"}, indent=2)
+        return json.dumps({"error": f"Error fetching job description: {str(e)}", "success": False}, indent=2)
     except Exception as e:
         evaluation_logger.log_error("Análisis Job Description", f"Error inesperado: {str(e)}")
-        return json.dumps({"error": f"Unexpected error: {str(e)}"}, indent=2)
+        return json.dumps({"error": f"Unexpected error: {str(e)}", "success": False}, indent=2)
 
 @tool
 def send_evaluation_email(subject: str, body: str) -> str:
