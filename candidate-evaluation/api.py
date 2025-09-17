@@ -23,6 +23,7 @@ class AnalysisResponse(BaseModel):
     timestamp: str
     execution_time: str = None
     results_file: str = None
+    result: dict = None
 
 @app.post("/analyze", response_model=AnalysisResponse)
 async def trigger_analysis():
@@ -69,12 +70,19 @@ async def trigger_analysis():
         
         evaluation_logger.log_task_complete("API", f"Proceso completado en {execution_time}")
         
+        # Preparar el resultado para retornar
+        try:
+            result_dict = json.loads(str(result)) if isinstance(result, str) else result
+        except (json.JSONDecodeError, TypeError):
+            result_dict = {"raw_result": str(result)}
+
         return AnalysisResponse(
             status="success",
             message="Análisis completado exitosamente",
             timestamp=start_time.strftime('%Y-%m-%d %H:%M:%S'),
             execution_time=execution_time,
-            results_file=filename
+            results_file=filename,
+            result=result_dict
         )
         
     except Exception as e:
