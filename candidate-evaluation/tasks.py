@@ -245,7 +245,7 @@ def create_email_sending_task(agent, processing_task):
         
         5. RESTRICCIÓN CRÍTICA: Solo usar la función send_evaluation_email UNA VEZ por ejecución.
         
-        El email debe ser enviado a francisco.sempe@flockit.com.ar usando la API configurada.
+        El email debe ser enviado a flocklab.id@gmail.com usando la API configurada.
         """,
         expected_output="Confirmación del envío y copia exacta del email completo enviado con toda la evaluación detallada",
         agent=agent,
