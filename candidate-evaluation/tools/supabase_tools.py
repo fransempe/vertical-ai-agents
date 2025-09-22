@@ -2,6 +2,7 @@ import os
 import json
 import requests
 import time
+from datetime import datetime
 from typing import List, Dict, Any
 from crewai.tools import tool
 from supabase import create_client, Client
@@ -110,7 +111,7 @@ def extract_supabase_conversations(limit: int = 100) -> str:
 @tool
 def fetch_job_description(job_description: str) -> str:
     """
-    Obtiene la descripción del trabajo desde el campo job_description de la tabla meets.
+    Obtiene la URL de la descripción del trabajo desde el campo job_description de la tabla meets.
     
     Args:
         job_description: URL de la descripción del trabajo
@@ -225,4 +226,32 @@ def send_evaluation_email(subject: str, body: str) -> str:
         return json.dumps({
             "status": "error",
             "message": f"Error inesperado: {str(e)}"
+        }, indent=2)
+
+@tool
+def get_current_date() -> str:
+    """
+    Obtiene la fecha actual del sistema en formato DD/MM/YYYY para usar en el asunto del email.
+    
+    Returns:
+        String con la fecha actual en formato DD/MM/YYYY
+    """
+    try:
+        current_date = datetime.now()
+        formatted_date = current_date.strftime("%d/%m/%Y")
+        
+        evaluation_logger.log_task_start("Obtener Fecha Actual", "Date Helper")
+        evaluation_logger.log_task_complete("Obtener Fecha Actual", f"Fecha obtenida: {formatted_date}")
+        
+        return json.dumps({
+            "current_date": formatted_date,
+            "date_format": "DD/MM/YYYY",
+            "example_subject": f"Reporte de Evaluación de Candidatos - {formatted_date}"
+        }, indent=2)
+        
+    except Exception as e:
+        evaluation_logger.log_error("Obtener Fecha Actual", f"Error obteniendo fecha: {str(e)}")
+        return json.dumps({
+            "error": f"Error obteniendo fecha actual: {str(e)}",
+            "fallback_date": "18/01/2025"
         }, indent=2)

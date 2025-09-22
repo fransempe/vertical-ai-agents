@@ -70,7 +70,6 @@ async def trigger_analysis():
         
         evaluation_logger.log_task_complete("API", f"Proceso completado en {execution_time}")
         
-        # Preparar el resultado para retornar
         try:
             # Si es un CrewOutput, extraer su contenido
             if hasattr(result, 'raw'):
@@ -80,12 +79,16 @@ async def trigger_analysis():
                 except json.JSONDecodeError:
                     # Si no es JSON válido, crear un dict con el contenido raw
                     result_dict = {"raw_result": result.raw}
+                    # Si el raw contiene el reporte formateado, intentar extraerlo
             else:
                 # Si no es CrewOutput, intentar convertir a dict
                 try:
                     result_dict = json.loads(str(result))
+                    # Extraer el reporte formateado si existe
+
                 except json.JSONDecodeError:
                     result_dict = {"raw_result": str(result)}
+                    # Si el resultado contiene el reporte formateado, intentar extraerlo
         except Exception:
             # Fallback en caso de cualquier error
             result_dict = {"raw_result": str(result)}
@@ -96,7 +99,7 @@ async def trigger_analysis():
             timestamp=start_time.strftime('%Y-%m-%d %H:%M:%S'),
             execution_time=execution_time,
             results_file=filename,
-            result=result_dict
+            result=result_dict,
         )
         
     except Exception as e:
