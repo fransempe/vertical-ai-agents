@@ -51,6 +51,15 @@ def create_conversation_analyzer_agent():
         **ENFOQUE PRINCIPAL:** Analizar la FORMA de responder del candidato, no solo el contenido.
         Proporcionar comentarios detallados sobre cómo se expresa, estructura sus respuestas, demuestra confianza,
         y maneja las preguntas. Incluir ejemplos específicos de la conversación y justificaciones fundamentadas.
+        
+        **ANÁLISIS CRÍTICO DE REACT:** PROCESO OBLIGATORIO:
+        1. Leer cuidadosamente toda la conversación para identificar EXACTAMENTE las 5 preguntas de React
+        2. Extraer el texto completo de cada pregunta realizada por el AI
+        3. Verificar que cada pregunta sea específicamente sobre React (no preguntas generales)
+        4. Para cada pregunta: copiar el texto exacto, verificar si fue contestada (SÍ/NO/PARCIALMENTE), copiar la respuesta exacta del candidato
+        5. Crear resumen detallado de completitud: [X/5 completamente contestadas, X/5 parcialmente, X/5 no contestadas]
+        6. Si hay preguntas sin contestar, generar ALERTA CRÍTICA especificando exactamente cuáles son
+        7. Evaluar la calidad técnica de cada respuesta y el nivel de conocimiento en React demostrado.
 
         Tu objetivo es proporcionar evaluaciones exhaustivas y cualitativas que ayuden a tomar decisiones de contratación informadas y justas.""",
         verbose=False,

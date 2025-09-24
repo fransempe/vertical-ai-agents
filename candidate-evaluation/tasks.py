@@ -113,7 +113,58 @@ def create_analysis_task(agent, extraction_task):
           * Ejemplos específicos de la conversación
           * Evidencia de pasión por el trabajo
 
-        ## 6. 🧠 **ANÁLISIS CONVERSACIONAL DETALLADO**
+        ## 6. 🔍 **ANÁLISIS OBLIGATORIO DE PREGUNTAS DE REACT**
+        
+        **⚠️ PROCESO CRÍTICO:** Identificar y evaluar EXACTAMENTE las 5 preguntas de React en la conversación.
+        
+        - **IDENTIFICACIÓN DE PREGUNTAS**: 
+          * Leer cuidadosamente toda la conversación
+          * Identificar EXACTAMENTE las 5 preguntas técnicas de React realizadas por el AI
+          * Extraer el texto completo de cada pregunta
+          * Verificar que sean preguntas sobre React (no generales)
+        
+        - **EVALUACIÓN DE RESPUESTAS POR PREGUNTA**:
+          * **Pregunta 1 de React**: 
+            - Texto exacto: "[COPIAR PREGUNTA EXACTA]"
+            - ¿Fue contestada? [SÍ/NO/PARCIALMENTE]
+            - Respuesta del candidato: "[COPIAR RESPUESTA EXACTA]"
+            - Evaluación: [ANÁLISIS DETALLADO DE LA RESPUESTA]
+          * **Pregunta 2 de React**: 
+            - Texto exacto: "[COPIAR PREGUNTA EXACTA]"
+            - ¿Fue contestada? [SÍ/NO/PARCIALMENTE]
+            - Respuesta del candidato: "[COPIAR RESPUESTA EXACTA]"
+            - Evaluación: [ANÁLISIS DETALLADO DE LA RESPUESTA]
+          * **Pregunta 3 de React**: 
+            - Texto exacto: "[COPIAR PREGUNTA EXACTA]"
+            - ¿Fue contestada? [SÍ/NO/PARCIALMENTE]
+            - Respuesta del candidato: "[COPIAR RESPUESTA EXACTA]"
+            - Evaluación: [ANÁLISIS DETALLADO DE LA RESPUESTA]
+          * **Pregunta 4 de React**: 
+            - Texto exacto: "[COPIAR PREGUNTA EXACTA]"
+            - ¿Fue contestada? [SÍ/NO/PARCIALMENTE]
+            - Respuesta del candidato: "[COPIAR RESPUESTA EXACTA]"
+            - Evaluación: [ANÁLISIS DETALLADO DE LA RESPUESTA]
+          * **Pregunta 5 de React**: 
+            - Texto exacto: "[COPIAR PREGUNTA EXACTA]"
+            - ¿Fue contestada? [SÍ/NO/PARCIALMENTE]
+            - Respuesta del candidato: "[COPIAR RESPUESTA EXACTA]"
+            - Evaluación: [ANÁLISIS DETALLADO DE LA RESPUESTA]
+        
+        - **RESUMEN DE COMPLETITUD**:
+          * Total de preguntas de React identificadas: [X/5]
+          * Preguntas completamente contestadas: [X/5]
+          * Preguntas parcialmente contestadas: [X/5]
+          * Preguntas NO contestadas: [X/5]
+          * **ALERTA CRÍTICA**: Si hay preguntas sin contestar, indicar claramente cuáles son
+        
+        - **EVALUACIÓN TÉCNICA GLOBAL**:
+          * Nivel de conocimiento técnico en React demostrado
+          * Precisión en conceptos específicos de React
+          * Capacidad de explicar conceptos complejos
+          * Ejemplos prácticos y código proporcionado
+          * Coherencia entre respuestas técnicas
+
+        ## 7. 🧠 **ANÁLISIS CONVERSACIONAL DETALLADO**
         - **Sentimientos Predominantes**: 
           * Comentario: Qué emociones predominan en la conversación
           * Ejemplos específicos de expresiones emocionales
@@ -131,7 +182,7 @@ def create_analysis_task(agent, extraction_task):
           * Ejemplos específicos de patrones observados
           * Implicaciones para el rol
 
-        ## 7. 📊 **EVALUACIÓN INTEGRAL**
+        ## 8. 📊 **EVALUACIÓN INTEGRAL**
         - **Resumen Ejecutivo**: 
           * Comentario general sobre el candidato
           * Impresión general de la conversación
@@ -304,7 +355,7 @@ def create_processing_task(agent, extraction_task, analysis_task, job_analysis_t
         Combinar todos los análisis realizados para crear DOS SALIDAS:
         1. Un reporte JSON completo con todos los datos
         2. Un reporte formateado en texto siguiendo el formato específico requerido
-
+        
         ## PRIMERA SALIDA - Reporte JSON completo:
         El reporte debe incluir para cada conversación:
         - Información básica (IDs, nombres, títulos)
@@ -313,7 +364,7 @@ def create_processing_task(agent, extraction_task, analysis_task, job_analysis_t
         - Análisis de descripción de trabajo desde Google Docs (si disponible)
         - Análisis de matcheo candidato vs job description (si disponible)
         - Resumen ejecutivo con recomendación final
-
+        
         Generar también estadísticas generales:
         - Total de conversaciones procesadas
         - Distribución por candidatos
@@ -323,7 +374,7 @@ def create_processing_task(agent, extraction_task, analysis_task, job_analysis_t
         - Promedio de compatibilidad candidato-puesto
         - Rankings de candidatos por puesto
         - Recomendaciones de contratación
-
+        
         ## SEGUNDA SALIDA - Reporte Formateado:
         Crear ADICIONALMENTE un reporte en texto formateado para cada candidato usando EXACTAMENTE este formato:
 
@@ -399,6 +450,13 @@ def create_email_sending_task(agent, processing_task):
         4. 📝 **ANÁLISIS CUALITATIVO:** En las secciones de habilidades y evaluación técnica, proporcionar análisis textuales detallados con comentarios sobre la forma de responder, ejemplos específicos y justificaciones fundamentadas
         5. 📝 **ANÁLISIS DE MATCHEO:** Debe ser un análisis textual breve de 1-2 líneas, sin puntajes numéricos, enfocado en la compatibilidad general del candidato con el puesto
         6. 🎯 **ENFOQUE PRINCIPAL:** Analizar la FORMA de responder del candidato, no solo el contenido, con comentarios detallados y justificaciones
+        6.1. 🔍 **ANÁLISIS REACT CRÍTICO:** 
+            - Leer cuidadosamente toda la conversación para identificar EXACTAMENTE las 5 preguntas de React
+            - Extraer el texto completo de cada pregunta realizada por el AI
+            - Verificar que cada pregunta sea específicamente sobre React (no generales)
+            - Para cada pregunta: copiar el texto exacto, verificar si fue contestada (SÍ/NO/PARCIALMENTE), copiar la respuesta exacta del candidato
+            - Crear un resumen de completitud: [X/5 completamente contestadas, X/5 parcialmente, X/5 no contestadas]
+            - Si hay preguntas sin contestar, generar ALERTA CRÍTICA especificando cuáles son
         7. 🏆 **TOP 5 CANDIDATOS:** Al final del email, crear un ranking de los 5 mejores candidatos (o menos si no hay suficientes) basado en su compatibilidad con el Job Description, ordenados del mejor al peor matcheo. Esta sección debe ir AL FINAL del informe, después de todas las evaluaciones individuales
         8. 📏 **LÍNEAS DIVISORIAS:** Entre cada informe de candidato, agregar una línea divisoria clara para separar visualmente cada evaluación
         9. 🏆 **ENMARCAR TOP 5:** Agregar líneas divisorias encima y debajo de la sección "Top 5 Candidatos" para enmarcarla completamente y separarla del resto del contenido
@@ -436,6 +494,16 @@ def create_email_sending_task(agent, processing_task):
         🏷️ Temas Clave: [LISTA_TEMAS]
         🔥 Nivel de Compromiso: [Bajo/Medio/Alto]
         ✨ Calidad de Respuesta: [DESCRIPCIÓN]
+
+        🔍 **ANÁLISIS DE PREGUNTAS DE REACT**
+        ⚠️ **SEGUIMIENTO CRÍTICO DE PREGUNTAS:**
+        📊 Total Preguntas Identificadas: [X/5 preguntas de React]
+        ✅ Preguntas Completamente Contestadas: [X/5]
+        ⚠️ Preguntas Parcialmente Contestadas: [X/5]
+        ❌ Preguntas NO Contestadas: [X/5]
+        🎯 Calidad Técnica Global: [ANÁLISIS_CALIDAD_TÉCNICA_REACT]
+        💡 Nivel de Conocimiento React: [NIVEL_CONOCIMIENTO_REACT]
+        🚨 **ALERTA**: [Si hay preguntas sin contestar, especificar cuáles]
 
         📝 **OBSERVACIONES DETALLADAS**
         💎 Fortalezas: [LISTA_FORTALEZAS]
@@ -498,14 +566,15 @@ def create_email_sending_task(agent, processing_task):
         🚀 **PROCESO OBLIGATORIO:**
         1. 📥 Tomar TODOS los resultados del procesamiento final
         2. ✨ Formatear cada candidato usando EXACTAMENTE el formato anterior
-        3. 📏 **LÍNEAS DIVISORIAS:** Agregar líneas divisorias entre cada informe de candidato para separación visual
-        4. 🏆 **CREAR RANKING:** Evaluar la compatibilidad de cada candidato con el Job Description y ordenarlos del mejor al peor matcheo
-        5. 📊 **TOP 5:** Seleccionar los 5 mejores candidatos (o menos si no hay suficientes) y crear la sección de ranking
-        6. 📏 **ENMARCAR TOP 5:** Agregar líneas divisorias encima y debajo de la sección Top 5 para enmarcarla completamente
-        7. 📧 Crear un email con todos los candidatos evaluados + ranking
-        8. 🚀 Enviar UNA SOLA VEZ usando send_evaluation_email
-        9. 📅 La fecha debe ser la actual en formato DD/MM/YYYY
-        10. 🔄 Todos los campos entre corchetes deben ser reemplazados con datos reales
+        3. 🔍 **VERIFICAR ANÁLISIS REACT:** Asegurar que cada candidato tenga análisis detallado de las 5 preguntas de React con seguimiento de completitud
+        4. 📏 **LÍNEAS DIVISORIAS:** Agregar líneas divisorias entre cada informe de candidato para separación visual
+        5. 🏆 **CREAR RANKING:** Evaluar la compatibilidad de cada candidato con el Job Description y ordenarlos del mejor al peor matcheo
+        6. 📊 **TOP 5:** Seleccionar los 5 mejores candidatos (o menos si no hay suficientes) y crear la sección de ranking
+        7. 📏 **ENMARCAR TOP 5:** Agregar líneas divisorias encima y debajo de la sección Top 5 para enmarcarla completamente
+        8. 📧 Crear un email con todos los candidatos evaluados + ranking
+        9. 🚀 Enviar UNA SOLA VEZ usando send_evaluation_email
+        10. 📅 La fecha debe ser la actual en formato DD/MM/YYYY
+        11. 🔄 Todos los campos entre corchetes deben ser reemplazados con datos reales
 
         ⚠️ **RESTRICCIÓN CRÍTICA:** Solo usar send_evaluation_email UNA VEZ por ejecución.
         """,
