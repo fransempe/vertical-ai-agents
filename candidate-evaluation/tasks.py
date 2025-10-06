@@ -113,53 +113,53 @@ def create_analysis_task(agent, extraction_task):
           * Ejemplos específicos de la conversación
           * Evidencia de pasión por el trabajo
 
-        ## 6. 🔍 **ANÁLISIS OBLIGATORIO DE PREGUNTAS DE REACT**
+        ## 6. 🔍 **ANÁLISIS OBLIGATORIO DE PREGUNTAS TÉCNICAS**
         
-        **⚠️ PROCESO CRÍTICO:** Identificar y evaluar EXACTAMENTE las 5 preguntas de React en la conversación.
+        **⚠️ PROCESO CRÍTICO:** Identificar y evaluar EXACTAMENTE las preguntas técnicas específicas en la conversación basadas en el job_description.
         
         - **IDENTIFICACIÓN DE PREGUNTAS**: 
           * Leer cuidadosamente toda la conversación
-          * Identificar EXACTAMENTE las 5 preguntas técnicas de React realizadas por el AI
-          * Extraer el texto completo de cada pregunta
-          * Verificar que sean preguntas sobre React (no generales)
+          * Identificar EXACTAMENTE las preguntas técnicas específicas realizadas por el AI
+          * Extraer el texto completo de cada pregunta técnica
+          * Verificar que sean preguntas sobre la tecnología/stack específico del puesto (basado en job_description)
         
         - **EVALUACIÓN DE RESPUESTAS POR PREGUNTA**:
-          * **Pregunta 1 de React**: 
+          * **Pregunta Técnica 1**: 
             - Texto exacto: "[COPIAR PREGUNTA EXACTA]"
             - ¿Fue contestada? [SÍ/NO/PARCIALMENTE]
             - Respuesta del candidato: "[COPIAR RESPUESTA EXACTA]"
             - Evaluación: [ANÁLISIS DETALLADO DE LA RESPUESTA]
-          * **Pregunta 2 de React**: 
+          * **Pregunta Técnica 2**: 
             - Texto exacto: "[COPIAR PREGUNTA EXACTA]"
             - ¿Fue contestada? [SÍ/NO/PARCIALMENTE]
             - Respuesta del candidato: "[COPIAR RESPUESTA EXACTA]"
             - Evaluación: [ANÁLISIS DETALLADO DE LA RESPUESTA]
-          * **Pregunta 3 de React**: 
+          * **Pregunta Técnica 3**: 
             - Texto exacto: "[COPIAR PREGUNTA EXACTA]"
             - ¿Fue contestada? [SÍ/NO/PARCIALMENTE]
             - Respuesta del candidato: "[COPIAR RESPUESTA EXACTA]"
             - Evaluación: [ANÁLISIS DETALLADO DE LA RESPUESTA]
-          * **Pregunta 4 de React**: 
+          * **Pregunta Técnica 4**: 
             - Texto exacto: "[COPIAR PREGUNTA EXACTA]"
             - ¿Fue contestada? [SÍ/NO/PARCIALMENTE]
             - Respuesta del candidato: "[COPIAR RESPUESTA EXACTA]"
             - Evaluación: [ANÁLISIS DETALLADO DE LA RESPUESTA]
-          * **Pregunta 5 de React**: 
+          * **Pregunta Técnica 5**: 
             - Texto exacto: "[COPIAR PREGUNTA EXACTA]"
             - ¿Fue contestada? [SÍ/NO/PARCIALMENTE]
             - Respuesta del candidato: "[COPIAR RESPUESTA EXACTA]"
             - Evaluación: [ANÁLISIS DETALLADO DE LA RESPUESTA]
         
         - **RESUMEN DE COMPLETITUD**:
-          * Total de preguntas de React identificadas: [X/5]
-          * Preguntas completamente contestadas: [X/5]
-          * Preguntas parcialmente contestadas: [X/5]
-          * Preguntas NO contestadas: [X/5]
+          * Total de preguntas técnicas identificadas: [X/Y]
+          * Preguntas completamente contestadas: [X/Y]
+          * Preguntas parcialmente contestadas: [X/Y]
+          * Preguntas NO contestadas: [X/Y]
           * **ALERTA CRÍTICA**: Si hay preguntas sin contestar, indicar claramente cuáles son
         
         - **EVALUACIÓN TÉCNICA GLOBAL**:
-          * Nivel de conocimiento técnico en React demostrado
-          * Precisión en conceptos específicos de React
+          * Nivel de conocimiento técnico en la tecnología específica demostrado
+          * Precisión en conceptos específicos de la tecnología/stack
           * Capacidad de explicar conceptos complejos
           * Ejemplos prácticos y código proporcionado
           * Coherencia entre respuestas técnicas
@@ -263,18 +263,18 @@ def create_job_analysis_task(agent, extraction_task):
     """Tarea de análisis de descripciones de trabajo"""
     return Task(
         description="""
-        📄 Analizar las descripciones de trabajo obtenidas de URLs de Google Docs en el campo job_description de la tabla meets.
+        📄 Analizar las descripciones de trabajo obtenidas de la tabla jd_interviews para evaluación dinámica.
         
         🔍 **PROCESO DE ANÁLISIS:**
-        Para cada conversación que tenga una URL de Google Doc con descripción de trabajo:
+        Para cada registro en jd_interviews:
         
-        1. 🌐 **Acceder al Google Doc:**
-           - Abrir la URL del Google Doc público
-           - Extraer todo el contenido del documento
-           - Verificar que sea accesible y legible
+        1. 📊 **Obtener datos de jd_interviews:**
+           - Consultar la tabla jd_interviews usando get_jd_interview_data()
+           - Extraer el campo job_description de cada registro
+           - Obtener información del agente asignado (agent_id)
         
         2. 📋 **Extraer requisitos clave del puesto:**
-           - 🛠️ Habilidades técnicas requeridas
+           - 🛠️ Habilidades técnicas requeridas (identificar tecnologías específicas)
            - 💼 Experiencia necesaria (años, nivel)
            - 🤝 Competencias blandas deseadas
            - 🎓 Nivel de educación requerido
@@ -285,6 +285,7 @@ def create_job_analysis_task(agent, extraction_task):
         
         3. 🎯 **Crear perfil detallado del puesto ideal:**
            - Candidato perfecto para este rol
+           - Tecnologías específicas requeridas
            - Puntajes de competencias esperadas
            - Prioridades del puesto
            - Criterios de evaluación
@@ -293,13 +294,14 @@ def create_job_analysis_task(agent, extraction_task):
            - Estructurar datos para matcheo con candidatos
            - Identificar criterios críticos vs deseables
            - Definir pesos de importancia
+           - Mapear tecnologías específicas para análisis técnico
         
         ⚠️ **IMPORTANTE:** Todo el análisis debe estar en ESPAÑOL LATINO.
         Utiliza terminología de recursos humanos en español de América Latina.
 
         📤 **SALIDA:** Análisis detallado en formato JSON estructurado con información clara y procesable.
         """,
-        expected_output="Análisis detallado de cada descripción de trabajo en formato JSON",
+        expected_output="Análisis detallado de cada descripción de trabajo desde jd_interviews en formato JSON",
         agent=agent,
         context=[extraction_task]
     )
@@ -450,12 +452,12 @@ def create_email_sending_task(agent, processing_task):
         4. 📝 **ANÁLISIS CUALITATIVO:** En las secciones de habilidades y evaluación técnica, proporcionar análisis textuales detallados con comentarios sobre la forma de responder, ejemplos específicos y justificaciones fundamentadas
         5. 📝 **ANÁLISIS DE MATCHEO:** Debe ser un análisis textual breve de 1-2 líneas, sin puntajes numéricos, enfocado en la compatibilidad general del candidato con el puesto
         6. 🎯 **ENFOQUE PRINCIPAL:** Analizar la FORMA de responder del candidato, no solo el contenido, con comentarios detallados y justificaciones
-        6.1. 🔍 **ANÁLISIS REACT CRÍTICO:** 
-            - Leer cuidadosamente toda la conversación para identificar EXACTAMENTE las 5 preguntas de React
-            - Extraer el texto completo de cada pregunta realizada por el AI
-            - Verificar que cada pregunta sea específicamente sobre React (no generales)
+        6.1. 🔍 **ANÁLISIS TÉCNICO CRÍTICO:** 
+            - Leer cuidadosamente toda la conversación para identificar EXACTAMENTE las preguntas técnicas específicas
+            - Extraer el texto completo de cada pregunta técnica realizada por el AI
+            - Verificar que cada pregunta sea específicamente sobre la tecnología/stack del puesto (basado en job_description)
             - Para cada pregunta: copiar el texto exacto, verificar si fue contestada (SÍ/NO/PARCIALMENTE), copiar la respuesta exacta del candidato
-            - Crear un resumen de completitud: [X/5 completamente contestadas, X/5 parcialmente, X/5 no contestadas]
+            - Crear un resumen de completitud: [X/Y completamente contestadas, X/Y parcialmente, X/Y no contestadas]
             - Si hay preguntas sin contestar, generar ALERTA CRÍTICA especificando cuáles son
         7. 🏆 **TOP 5 CANDIDATOS:** Al final del email, crear un ranking de los 5 mejores candidatos (o menos si no hay suficientes) basado en su compatibilidad con el Job Description, ordenados del mejor al peor matcheo. Esta sección debe ir AL FINAL del informe, después de todas las evaluaciones individuales
         8. 📏 **LÍNEAS DIVISORIAS:** Entre cada informe de candidato, agregar una línea divisoria clara para separar visualmente cada evaluación
@@ -495,14 +497,14 @@ def create_email_sending_task(agent, processing_task):
         🔥 Nivel de Compromiso: [Bajo/Medio/Alto]
         ✨ Calidad de Respuesta: [DESCRIPCIÓN]
 
-        🔍 **ANÁLISIS DE PREGUNTAS DE REACT**
+        🔍 **ANÁLISIS DE PREGUNTAS TÉCNICAS**
         ⚠️ **SEGUIMIENTO CRÍTICO DE PREGUNTAS:**
-        📊 Total Preguntas Identificadas: [X/5 preguntas de React]
-        ✅ Preguntas Completamente Contestadas: [X/5]
-        ⚠️ Preguntas Parcialmente Contestadas: [X/5]
-        ❌ Preguntas NO Contestadas: [X/5]
-        🎯 Calidad Técnica Global: [ANÁLISIS_CALIDAD_TÉCNICA_REACT]
-        💡 Nivel de Conocimiento React: [NIVEL_CONOCIMIENTO_REACT]
+        📊 Total Preguntas Identificadas: [X/Y preguntas técnicas específicas]
+        ✅ Preguntas Completamente Contestadas: [X/Y]
+        ⚠️ Preguntas Parcialmente Contestadas: [X/Y]
+        ❌ Preguntas NO Contestadas: [X/Y]
+        🎯 Calidad Técnica Global: [ANÁLISIS_CALIDAD_TÉCNICA_ESPECÍFICA]
+        💡 Nivel de Conocimiento Técnico: [NIVEL_CONOCIMIENTO_TECNOLOGÍA_ESPECÍFICA]
         🚨 **ALERTA**: [Si hay preguntas sin contestar, especificar cuáles]
 
         📝 **OBSERVACIONES DETALLADAS**
@@ -566,7 +568,7 @@ def create_email_sending_task(agent, processing_task):
         🚀 **PROCESO OBLIGATORIO:**
         1. 📥 Tomar TODOS los resultados del procesamiento final
         2. ✨ Formatear cada candidato usando EXACTAMENTE el formato anterior
-        3. 🔍 **VERIFICAR ANÁLISIS REACT:** Asegurar que cada candidato tenga análisis detallado de las 5 preguntas de React con seguimiento de completitud
+        3. 🔍 **VERIFICAR ANÁLISIS TÉCNICO:** Asegurar que cada candidato tenga análisis detallado de las preguntas técnicas específicas con seguimiento de completitud
         4. 📏 **LÍNEAS DIVISORIAS:** Agregar líneas divisorias entre cada informe de candidato para separación visual
         5. 🏆 **CREAR RANKING:** Evaluar la compatibilidad de cada candidato con el Job Description y ordenarlos del mejor al peor matcheo
         6. 📊 **TOP 5:** Seleccionar los 5 mejores candidatos (o menos si no hay suficientes) y crear la sección de ranking

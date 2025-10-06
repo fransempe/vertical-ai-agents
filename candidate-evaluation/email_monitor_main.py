@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Script principal para el agente de monitoreo de emails
-Escucha emails con subjects específicos: ReactJS-JD, NodeJS-JD, Java-JD
+Escucha emails con subjects específicos: ReactJS-JD, NodeJS-JD, Angular-JD, AIEngineering-JD, Java-JD
 """
 
 import os
@@ -61,6 +61,16 @@ def test_email_simulation():
             "subject": "NodeJS-JD - Backend Engineer Position",
             "content": "Exciting opportunity for a Node.js backend engineer...",
             "sender": "recruiter@startup.com"
+        },
+        {
+            "subject": "Angular-JD - Frontend Developer",
+            "content": "Angular developer needed for enterprise application...",
+            "sender": "recruiting@tech.com"
+        },
+        {
+            "subject": "AIEngineering-JD - Machine Learning Engineer",
+            "content": "Join our AI team to build cutting-edge ML solutions...",
+            "sender": "ai-jobs@company.com"
         },
         {
             "subject": "Java-JD - Full Stack Java Developer",

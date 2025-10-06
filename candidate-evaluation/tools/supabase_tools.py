@@ -229,6 +229,48 @@ def send_evaluation_email(subject: str, body: str) -> str:
         }, indent=2)
 
 @tool
+def get_jd_interview_data(interview_id: str = None) -> str:
+    """
+    Obtiene datos de la tabla jd_interviews, incluyendo job_description para análisis dinámico.
+    
+    Args:
+        interview_id: ID específico de la entrevista (opcional, si no se proporciona obtiene todas)
+        
+    Returns:
+        JSON string con los datos de jd_interviews
+    """
+    try:
+        evaluation_logger.log_task_start("Obtener JD Interview Data", "JD Interview Data Extractor")
+        
+        url = os.getenv("SUPABASE_URL")
+        key = os.getenv("SUPABASE_KEY")
+        supabase = create_client(url, key)
+        
+        if interview_id:
+            response = supabase.table('jd_interviews').select('*').eq('id', interview_id).execute()
+        else:
+            response = supabase.table('jd_interviews').select('*').execute()
+        
+        interviews = []
+        for row in response.data:
+            interview = {
+                "id": row.get('id'),
+                "interview_name": row.get('interview_name'),
+                "agent_id": row.get('agent_id'),
+                "job_description": row.get('job_description'),
+                "email_source": row.get('email_source'),
+                "created_at": row.get('created_at')
+            }
+            interviews.append(interview)
+        
+        evaluation_logger.log_task_complete("Obtener JD Interview Data", f"{len(interviews)} registros obtenidos")
+        return json.dumps(interviews, indent=2)
+        
+    except Exception as e:
+        evaluation_logger.log_error("Obtener JD Interview Data", f"Error obteniendo datos: {str(e)}")
+        return json.dumps({"error": f"Error obteniendo datos de jd_interviews: {str(e)}"}, indent=2)
+
+@tool
 def get_current_date() -> str:
     """
     Obtiene la fecha actual del sistema en formato DD/MM/YYYY para usar en el asunto del email.

@@ -3,11 +3,12 @@ import email
 import time
 import json
 from email.header import decode_header
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from crewai.tools import tool
 import os
 import sys
 from dotenv import load_dotenv
+from supabase import create_client, Client
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from utils.logger import evaluation_logger
 
@@ -17,10 +18,15 @@ class EmailMonitor:
     def __init__(self):
         self.email_address = os.getenv("EMAIL_ADDRESS", "ai.vertical.agents.sender@gmail.com")
         self.email_password = os.getenv("EMAIL_PASSWORD")
-        self.target_subjects = ["ReactJS-JD", "NodeJS-JD", "Java-JD"]
+        self.target_subjects = ["ReactJS-JD", "NodeJS-JD", "Angular-JD", "AIEngineering-JD", "Java-JD"]
         self.is_monitoring = False
         self.imap_server = "imap.gmail.com"
         self.imap_port = 993
+        
+        # Inicializar Supabase
+        url = os.getenv("SUPABASE_URL")
+        key = os.getenv("SUPABASE_KEY")
+        self.supabase = create_client(url, key)
 
     def connect_to_email(self):
         """
@@ -109,6 +115,113 @@ class EmailMonitor:
 
         return content
 
+    def get_agents_from_db(self) -> List[Dict[str, Any]]:
+        """
+        Consulta la tabla agents en Supabase
+        
+        Returns:
+            Lista de agentes con sus datos
+        """
+        try:
+            response = self.supabase.table('agents').select('*').execute()
+            return response.data
+        except Exception as e:
+            evaluation_logger.log_error("Consulta agents", f"Error consultando tabla agents: {str(e)}")
+            return []
+
+    def match_email_to_agent(self, subject: str, content: str) -> Optional[Dict[str, Any]]:
+        """
+        Matchea el subject y contenido del email con un agente de la BD
+        
+        Args:
+            subject: Asunto del email
+            content: Contenido del email
+            
+        Returns:
+            Diccionario con el agente que mejor matchea, o None si no hay match
+        """
+        try:
+            agents = self.get_agents_from_db()
+            
+            if not agents:
+                return None
+            
+            # Mapeo de subjects a tech_stack
+            subject_to_tech = {
+                "ReactJS-JD": ["ReactJS", "React"],
+                "NodeJS-JD": ["NodeJS", "Node.js", "Node"],
+                "Angular-JD": ["Angular"],
+                "AIEngineering-JD": ["AI", "Artificial Intelligence", "Machine Learning", "ML"],
+                "Java-JD": ["Java"]
+            }
+            
+            # Buscar el tech stack en el subject
+            matched_tech = None
+            for subject_key, tech_keywords in subject_to_tech.items():
+                if subject_key in subject:
+                    matched_tech = tech_keywords
+                    break
+            
+            if not matched_tech:
+                return None
+            
+            # Buscar agente que tenga el tech_stack correspondiente
+            for agent in agents:
+                agent_tech_stack = agent.get('tech_stack', '').lower()
+                agent_name = agent.get('name', '').lower()
+                
+                # Verificar si alguno de los keywords está en el tech_stack o nombre del agente
+                for tech_keyword in matched_tech:
+                    if tech_keyword.lower() in agent_tech_stack or tech_keyword.lower() in agent_name:
+                        return agent
+            
+            return None
+            
+        except Exception as e:
+            evaluation_logger.log_error("Matching Email-Agent", f"Error haciendo match: {str(e)}")
+            return None
+
+    def insert_jd_interview(self, interview_name: str, agent_id: str, job_description: str, 
+                           email_source: str) -> Optional[Dict[str, Any]]:
+        """
+        Inserta un nuevo registro en la tabla jd_interviews
+        
+        Args:
+            interview_name: Nombre de la entrevista
+            agent_id: ID del agente asignado
+            job_description: Descripción del trabajo o contenido del email
+            email_source: Email de origen
+            
+        Returns:
+            Diccionario con el resultado del insert, o None si falla
+        """
+        try:
+            evaluation_logger.log_task_start("Insert JD Interview", "Insertando registro en jd_interviews")
+            
+            data = {
+                "interview_name": interview_name,
+                "agent_id": agent_id,
+                "job_description": job_description,
+                "email_source": email_source
+            }
+            
+            response = self.supabase.table('jd_interviews').insert(data).execute()
+            
+            if response.data and len(response.data) > 0:
+                inserted_record = response.data[0]
+                evaluation_logger.log_task_complete(
+                    "Insert JD Interview", 
+                    f"Registro insertado exitosamente - ID: {inserted_record.get('id', 'N/A')}"
+                )
+                return inserted_record
+            else:
+                evaluation_logger.log_error("Insert JD Interview", "No se pudo insertar el registro")
+                return None
+                
+        except Exception as e:
+            evaluation_logger.log_error("Insert JD Interview", f"Error insertando registro: {str(e)}")
+            return None
+
     def process_email_content(self, email_data: Dict[str, Any]) -> None:
         """
         Procesa el contenido del email y lo muestra en consola
@@ -132,6 +245,48 @@ class EmailMonitor:
             print("📄 CONTENIDO:")
             print(content)
             print("=" * 80)
+            
+            # Matchear con agente
+            matched_agent = self.match_email_to_agent(subject, content)
+            
+            print("\n🤖 RESULTADO DEL MATCHING CON AGENTE:")
+            print("=" * 80)
+            if matched_agent:
+                print(f"✅ AGENTE ENCONTRADO:")
+                print(f"   - Agent ID: {matched_agent.get('agent_id', 'N/A')}")
+                print(f"   - Name: {matched_agent.get('name', 'N/A')}")
+                print(f"   - Tech Stack: {matched_agent.get('tech_stack', 'N/A')}")
+                print(f"   - Description: {matched_agent.get('description', 'N/A')}")
+                print(f"   - Status: {matched_agent.get('status', 'N/A')}")
+                
+                # Insertar en la tabla jd_interviews
+                interview_name = f"Interview - {subject}"
+                agent_id = matched_agent.get('agent_id')
+                
+                inserted_record = self.insert_jd_interview(
+                    interview_name=interview_name,
+                    agent_id=agent_id,
+                    job_description=content,
+                    email_source=sender
+                )
+                
+                print("\n💾 RESULTADO DEL INSERT EN jd_interviews:")
+                print("=" * 80)
+                if inserted_record:
+                    print(f"✅ REGISTRO INSERTADO EXITOSAMENTE:")
+                    print(f"   - ID: {inserted_record.get('id', 'N/A')}")
+                    print(f"   - Interview Name: {inserted_record.get('interview_name', 'N/A')}")
+                    print(f"   - Agent ID: {inserted_record.get('agent_id', 'N/A')}")
+                    print(f"   - Job Description: {inserted_record.get('job_description', 'N/A')[:100]}...")
+                    print(f"   - Email Source: {inserted_record.get('email_source', 'N/A')}")
+                    print(f"   - Created At: {inserted_record.get('created_at', 'N/A')}")
+                else:
+                    print("❌ ERROR AL INSERTAR REGISTRO")
+                print("=" * 80 + "\n")
+                
+            else:
+                print("❌ NO SE ENCONTRÓ AGENTE MATCHING")
+            print("=" * 80 + "\n")
 
             evaluation_logger.log_task_complete("Procesamiento Email", f"Email procesado: {subject}")
 

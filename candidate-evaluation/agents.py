@@ -2,7 +2,7 @@
 import os
 from crewai import Agent
 from langchain_openai import ChatOpenAI
-from tools.supabase_tools import extract_supabase_conversations, fetch_job_description, send_evaluation_email, get_current_date
+from tools.supabase_tools import extract_supabase_conversations, fetch_job_description, send_evaluation_email, get_current_date, get_jd_interview_data
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -52,14 +52,14 @@ def create_conversation_analyzer_agent():
         Proporcionar comentarios detallados sobre cómo se expresa, estructura sus respuestas, demuestra confianza,
         y maneja las preguntas. Incluir ejemplos específicos de la conversación y justificaciones fundamentadas.
         
-        **ANÁLISIS CRÍTICO DE REACT:** PROCESO OBLIGATORIO:
-        1. Leer cuidadosamente toda la conversación para identificar EXACTAMENTE las 5 preguntas de React
-        2. Extraer el texto completo de cada pregunta realizada por el AI
-        3. Verificar que cada pregunta sea específicamente sobre React (no preguntas generales)
+        **ANÁLISIS CRÍTICO TÉCNICO:** PROCESO OBLIGATORIO:
+        1. Leer cuidadosamente toda la conversación para identificar EXACTAMENTE las preguntas técnicas específicas
+        2. Extraer el texto completo de cada pregunta técnica realizada por el AI
+        3. Verificar que cada pregunta sea específicamente sobre la tecnología/stack del puesto (basado en job_description)
         4. Para cada pregunta: copiar el texto exacto, verificar si fue contestada (SÍ/NO/PARCIALMENTE), copiar la respuesta exacta del candidato
         5. Crear resumen detallado de completitud: [X/5 completamente contestadas, X/5 parcialmente, X/5 no contestadas]
         6. Si hay preguntas sin contestar, generar ALERTA CRÍTICA especificando exactamente cuáles son
-        7. Evaluar la calidad técnica de cada respuesta y el nivel de conocimiento en React demostrado.
+        7. Evaluar la calidad técnica de cada respuesta y el nivel de conocimiento en la tecnología específica demostrado.
 
         Tu objetivo es proporcionar evaluaciones exhaustivas y cualitativas que ayuden a tomar decisiones de contratación informadas y justas.""",
         verbose=False,
@@ -70,18 +70,18 @@ def create_job_description_analyzer_agent():
     """Crea el agente analizador de descripciones de trabajo"""
     return Agent(
         role="Job Description Analysis Expert",
-        goal="Analizar descripciones de trabajo y compararlas con los resultados de las conversaciones",
-        backstory="""Eres un experto en análisis de descripciones de trabajo y recursos humanos con especialización en Google Docs.
-        Tu especialidad es acceder a Google Docs públicos que contienen job descriptions, extraer información detallada
-        de los requisitos del puesto, habilidades necesarias, experiencia requerida, y luego compararlas con los 
-        resultados de análisis de conversaciones para determinar qué tan bien se ajusta cada candidato al puesto.
+        goal="Analizar descripciones de trabajo desde la tabla jd_interviews y compararlas con los resultados de las conversaciones",
+        backstory="""Eres un experto en análisis de descripciones de trabajo y recursos humanos con especialización en análisis dinámico.
+        Tu especialidad es extraer información detallada de job descriptions desde la tabla jd_interviews, analizar los requisitos 
+        del puesto, habilidades necesarias, experiencia requerida, y luego compararlas con los resultados de análisis de conversaciones 
+        para determinar qué tan bien se ajusta cada candidato al puesto.
         
         Tienes experiencia en:
-        - Acceso y extracción de contenido de Google Docs públicos
-        - Análisis de job descriptions en formato de documento
-        - Extracción de requisitos técnicos y blandos
+        - Extracción y análisis de job descriptions desde base de datos
+        - Análisis dinámico de requisitos técnicos y blandos basado en el contenido
+        - Identificación de tecnologías y stacks específicos mencionados
         - Evaluación de compatibilidad candidato-puesto
-        - Generación de puntajes de matcheo detallados
+        - Generación de análisis de matcheo detallados
         
         Proporcionas un análisis textual breve y conciso de la compatibilidad candidato-puesto,
         enfocándote en el nivel general de matcheo y las fortalezas principales que coinciden,
@@ -89,7 +89,7 @@ def create_job_description_analyzer_agent():
         
         IMPORTANTE: Todas tus respuestas y análisis deben ser en ESPAÑOL LATINO.
         Utiliza terminología de recursos humanos y análisis laboral en español de América Latina.""",
-        tools=[fetch_job_description],
+        tools=[get_jd_interview_data],
         verbose=True,
         llm=llm
     )
