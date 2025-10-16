@@ -290,10 +290,99 @@ def get_current_date() -> str:
             "date_format": "DD/MM/YYYY",
             "example_subject": f"Reporte de Evaluación de Candidatos - {formatted_date}"
         }, indent=2)
-        
     except Exception as e:
         evaluation_logger.log_error("Obtener Fecha Actual", f"Error obteniendo fecha: {str(e)}")
         return json.dumps({
             "error": f"Error obteniendo fecha actual: {str(e)}",
             "fallback_date": "18/01/2025"
+        }, indent=2)
+
+@tool
+def create_candidate(name: str, email: str, phone: str, cv_url: str, tech_stack: str) -> str:
+    """
+    Crea (o actualiza por email) un candidato en la tabla 'candidates'.
+
+    Args:
+        name: Nombre completo del candidato
+        email: Email del candidato (clave única preferida)
+        phone: Teléfono del candidato
+        cv_url: URL del CV (en S3)
+        tech_stack: Tecnologías del candidato. Puede ser:
+            - JSON array string (e.g. "[\"Python\", \"AWS\"]")
+            - Lista separada por comas (e.g. "Python, AWS")
+
+    Returns:
+        JSON string con el resultado de la operación
+    """
+    try:
+        evaluation_logger.log_task_start("Crear Candidato", "Supabase")
+
+        url = os.getenv("SUPABASE_URL")
+        key = os.getenv("SUPABASE_KEY")
+        supabase = create_client(url, key)
+
+        # Normalizar tech_stack a lista
+        parsed_stack = []
+        if tech_stack:
+            try:
+                maybe_json = json.loads(tech_stack)
+                if isinstance(maybe_json, list):
+                    parsed_stack = [str(x).strip() for x in maybe_json if str(x).strip()]
+                else:
+                    parsed_stack = [str(maybe_json).strip()]
+            except json.JSONDecodeError:
+                parsed_stack = [t.strip() for t in tech_stack.split(',') if t.strip()]
+
+        # Construir payload base
+        payload = {
+            "name": name or None,
+            "email": email or None,
+            "phone": phone or None,
+            "cv_url": cv_url or None,
+            "tech_stack": parsed_stack if parsed_stack else None,
+        }
+
+        # Validar email básico (si viene)
+        email_value = (email or "").strip()
+        is_valid_email = False
+        if email_value:
+            import re
+            email_regex = r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$"
+            is_valid_email = re.match(email_regex, email_value) is not None
+
+        if is_valid_email:
+            # Chequear existencia previa por email
+            try:
+                existing = supabase.table('candidates').select('*').eq('email', email_value).limit(1).execute()
+                if existing.data and len(existing.data) > 0:
+                    # Ya existe → devolver error explícito
+                    return json.dumps({
+                        "success": False,
+                        "error": "Candidate already exists with this email",
+                        "error_type": "AlreadyExists",
+                        "email": email_value,
+                        "existing": existing.data[0]
+                    }, indent=2, ensure_ascii=False)
+            except Exception as qe:
+                # Si falla la consulta, continuar con insert para no bloquear (pero loggear)
+                evaluation_logger.log_error("Crear Candidato", f"Error verificando existencia por email: {str(qe)}")
+
+            # Insertar nuevo registro (no upsert)
+            response = supabase.table('candidates').insert(payload).execute()
+        else:
+            # Email ausente o inválido → se permite dar de alta igual
+            response = supabase.table('candidates').insert(payload).execute()
+
+        evaluation_logger.log_task_complete("Crear Candidato", "Registro creado/actualizado en candidates")
+        return json.dumps({
+            "success": True,
+            "action": "upsert" if email else "insert",
+            "data": response.data
+        }, indent=2, ensure_ascii=False)
+
+    except Exception as e:
+        evaluation_logger.log_error("Crear Candidato", f"Error: {str(e)}")
+        return json.dumps({
+            "success": False,
+            "error": f"Error creando candidato: {str(e)}"
         }, indent=2)
