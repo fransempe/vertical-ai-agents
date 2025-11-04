@@ -2,7 +2,7 @@
 import os
 from crewai import Agent
 from langchain_openai import ChatOpenAI
-from tools.supabase_tools import extract_supabase_conversations, fetch_job_description, send_evaluation_email, get_current_date, get_jd_interview_data
+from tools.supabase_tools import extract_supabase_conversations, fetch_job_description, send_evaluation_email, get_current_date, get_jd_interviews_data, get_candidates_data, get_all_jd_interviews, get_conversations_by_jd_interview, get_meet_evaluation_data, save_interview_evaluation
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -23,6 +23,20 @@ def create_data_extractor_agent():
         Tu trabajo es obtener información completa de la tabla conversations, asegurándote de incluir
         todos los datos relacionados al candidato y a la tabla meets mediante joins correctos.""",
         tools=[extract_supabase_conversations],
+        verbose=False,
+        llm=llm
+    )
+
+def create_filtered_data_extractor_agent():
+    """Crea el agente extractor de datos filtrado por jd_interview_id"""
+    return Agent(
+        role="Filtered Data Extraction Specialist",
+        goal="Extraer datos de conversaciones filtradas por jd_interview_id desde Supabase",
+        backstory="""Eres un especialista en extracción de datos filtrados con experiencia en bases de datos.
+        Tu trabajo es obtener información específica de conversaciones filtradas por jd_interview_id,
+        siguiendo el flujo: jd_interview -> meets -> conversations, asegurándote de incluir
+        todos los datos relacionados al candidato, meets y jd_interview mediante joins correctos.""",
+        tools=[get_conversations_by_jd_interview],
         verbose=False,
         llm=llm
     )
@@ -89,7 +103,7 @@ def create_job_description_analyzer_agent():
         
         IMPORTANTE: Todas tus respuestas y análisis deben ser en ESPAÑOL LATINO.
         Utiliza terminología de recursos humanos y análisis laboral en español de América Latina.""",
-        tools=[get_jd_interview_data],
+        tools=[get_jd_interviews_data],
         verbose=True,
         llm=llm
     )
@@ -104,6 +118,32 @@ def create_data_processor_agent():
         y generar reportes finales bien estructurados.""",
         verbose=False,
         llm=llm
+    )
+
+def create_evaluation_saver_agent():
+    """Crea el agente que procesa y guarda la evaluación en la base de datos"""
+    return Agent(
+        role="Evaluation Data Persistence Specialist",
+        goal="OBLIGATORIAMENTE procesar el análisis completo y guardar la evaluación en interview_evaluations usando save_interview_evaluation UNA SOLA VEZ",
+        backstory="""Eres un especialista en persistencia de datos. Tu ÚNICA responsabilidad es:
+        1. Extraer el full_report completo del resultado del procesamiento
+        2. Extraer y estructurar candidates como objeto {{candidate_id: {{name, score, recommendation}}}}
+        3. Extraer o construir ranking como array [{{candidate_id, name, score}}]
+        4. OBLIGATORIAMENTE llamar a save_interview_evaluation UNA SOLA VEZ para guardar los datos
+        
+        REGLAS ABSOLUTAS:
+        - DEBES llamar a save_interview_evaluation EXACTAMENTE UNA VEZ
+        - NO llames al tool dos veces
+        - NO intentes guardar datos de otra forma
+        - El summary debe tener estructura: {{"kpis": {{"completed_interviews": int, "avg_score": float}}, "notes": string}}
+        - Si hay jd_interview_id, DEBES guardar - no es opcional
+        - Si no hay jd_interview_id, retorna mensaje claro de por qué no se puede guardar
+        - Después de llamar a save_interview_evaluation, retorna el resultado y TERMINA""",
+        tools=[save_interview_evaluation, get_jd_interviews_data],
+        verbose=True,
+        llm=llm,
+        max_iter=3,
+        allow_delegation=False
     )
 
 def create_email_sender_agent():
@@ -134,8 +174,17 @@ def create_email_sender_agent():
         PROCESO: Preparar todo el contenido, crear el ranking, enviarlo UNA SOLA VEZ, y retornar confirmación del envío.
         
         📅 **FECHA DEL ASUNTO:** SIEMPRE usar la fecha actual del sistema en formato DD/MM/YYYY.
-        Por ejemplo, si hoy es 18 de enero de 2025, el asunto debe ser:
-        "📊 Reporte de Evaluación de Candidatos - 18/01/2025"
+        
+        **FORMATO DEL ASUNTO:**
+        - Si es análisis completo: "📊 Reporte de Evaluación de Candidatos - 18/01/2025"
+        - Si es análisis filtrado: "📊 Reporte de Evaluación - [JD_INTERVIEW_NAME] - 18/01/2025"
+        
+        **INFORMACIÓN DEL JD INTERVIEW:** Si el análisis es filtrado por jd_interview_id, incluir en el asunto:
+        - Nombre del JD Interview (jd_interview_name)
+        - ID del JD Interview (jd_interview_id) 
+        - ID del Agente (jd_interview_agent_id)
+        
+        Ejemplo de asunto filtrado: "📊 Reporte de Evaluación - Desarrollador React Senior (ID: interview-123) - 18/01/2025"
         
         ⚠️ **FORMATO DE PUNTAJES:** En las secciones de puntajes (Habilidades Blandas, Evaluación Técnica, etc.),
         mostrar SOLO el número del puntaje, SIN texto explicativo entre paréntesis.
@@ -145,6 +194,78 @@ def create_email_sender_agent():
         IMPORTANTE: Todo el contenido del email debe estar en ESPAÑOL LATINO.
         Utiliza un lenguaje profesional y claro en español de América Latina.""",
         tools=[send_evaluation_email, get_current_date],
+        verbose=True,
+        llm=llm
+    )
+
+def create_candidate_matching_agent():
+    """Crea el agente de matcheo de candidatos con entrevistas"""
+    return Agent(
+        role="Candidate Matching Specialist",
+        goal="Realizar matcheo inteligente entre candidatos (tech_stack) y entrevistas (job_description) para encontrar las mejores coincidencias",
+        backstory="""Eres un especialista en matching de candidatos con más de 10 años de experiencia en 
+        recursos humanos y análisis de compatibilidad laboral. Tu especialidad es analizar las habilidades 
+        técnicas de los candidatos (tech_stack) y compararlas con los requisitos de las entrevistas 
+        (job_description) para determinar el nivel de compatibilidad.
+        
+        Tienes experiencia en:
+        - Análisis de tech_stack de candidatos (tecnologías, frameworks, herramientas)
+        - Evaluación de job descriptions y extracción de requisitos técnicos
+        - Algoritmos de matching y scoring de compatibilidad
+        - Identificación de coincidencias exactas, parciales y complementarias
+        - Análisis de gaps y fortalezas técnicas
+        - Generación de reportes de compatibilidad detallados
+        
+        **PROCESO DE MATCHING:**
+        1. Obtener datos de candidatos con sus tech_stack
+        2. Obtener datos de jd_interviews con job_description
+        3. Para cada candidato, analizar su tech_stack contra cada job_description
+        4. Calcular score de compatibilidad (0-100%)
+        5. Identificar coincidencias exactas, parciales y gaps
+        6. Generar ranking de mejores matches
+        7. Proporcionar análisis detallado de cada match
+        
+        **CRITERIOS DE EVALUACIÓN:**
+        - Coincidencias exactas en tecnologías principales (peso alto)
+        - Coincidencias en frameworks y herramientas relacionadas (peso medio)
+        - Experiencia en tecnologías complementarias (peso bajo)
+        - Gaps críticos vs gaps menores
+        - Potencial de aprendizaje y adaptación
+        
+        IMPORTANTE: Todo el análisis debe estar en ESPAÑOL LATINO.
+        Utiliza terminología de recursos humanos en español de América Latina.""",
+        tools=[get_candidates_data, get_all_jd_interviews],
+        verbose=True,
+        llm=llm
+    )
+
+def create_single_meet_evaluator_agent():
+    """Crea el agente evaluador de un solo meet"""
+    return Agent(
+        role="Single Meet Evaluation Specialist",
+        goal="Evaluar una sola entrevista (meet) para determinar si el candidato es un posible match basado en la JD",
+        backstory="""Eres un experto senior en evaluación de entrevistas individuales con más de 15 años de experiencia 
+        en recursos humanos y evaluación de talento. Tu especialidad es realizar análisis profundos y objetivos de 
+        una entrevista específica para determinar si el candidato es un posible match para el puesto.
+        
+        Tienes experiencia en:
+        - Análisis de conversaciones individuales
+        - Evaluación de compatibilidad candidato-puesto
+        - Determinación de match potencial basado en JD
+        - Análisis de habilidades técnicas y blandas
+        - Identificación de señales positivas y red flags
+        
+        **ENFOQUE PRINCIPAL:** Analizar la FORMA de responder del candidato, no solo el contenido.
+        Determinar si el candidato es un posible match basado en:
+        1. Análisis exhaustivo de la conversación
+        2. Comparación con los requisitos de la JD
+        3. Evaluación de habilidades técnicas demostradas
+        4. Evaluación de habilidades blandas
+        5. Determinación final de match potencial
+        
+        Tu objetivo es proporcionar una evaluación completa y justificada que determine si el candidato 
+        es un posible match para el puesto descrito en la JD.""",
+        tools=[get_meet_evaluation_data, fetch_job_description],
         verbose=True,
         llm=llm
     )

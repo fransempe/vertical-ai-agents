@@ -10,10 +10,8 @@ def create_extraction_task(agent):
         - meet_id para enlazar con tabla meets
         
         Asegurar que cada registro incluya:
-        - ID de conversación
-        - Datos JSON de conversation_data
-        - Nombre del candidato
-        - ID de meet
+        - meet_id, candidate_id, conversation_data (campos específicos de conversations)
+        - Datos completos del candidato (id, name, email, phone, cv_url, tech_stack)
         """,
         expected_output="Lista JSON de conversaciones con toda la información relacionada",
         agent=agent
@@ -269,7 +267,7 @@ def create_job_analysis_task(agent, extraction_task):
         Para cada registro en jd_interviews:
         
         1. 📊 **Obtener datos de jd_interviews:**
-           - Consultar la tabla jd_interviews usando get_jd_interview_data()
+           - Consultar la tabla jd_interviews usando get_all_jd_interviews()
            - Extraer el campo job_description de cada registro
            - Obtener información del agente asignado (agent_id)
         
@@ -383,6 +381,9 @@ def create_processing_task(agent, extraction_task, analysis_task, job_analysis_t
         PARA CADA CANDIDATO:
         ```
         Asunto: Reporte de Evaluación de Candidatos - [FECHA_ACTUAL] (Colocar la fecha de hoy en formato DD/MM/YYYY)
+        
+        **SI ES ANÁLISIS FILTRADO:**
+        Asunto: Reporte de Evaluación - [JD_INTERVIEW_NAME] (ID: [JD_INTERVIEW_ID]) - [FECHA_ACTUAL]
 
         Estimado equipo de reclutamiento,
 
@@ -447,8 +448,12 @@ def create_email_sending_task(agent, processing_task):
 
         🎯 **INSTRUCCIONES CRÍTICAS:**
         1. 📅 **PRIMERO:** Usar la herramienta get_current_date() para obtener la fecha actual en formato DD/MM/YYYY
-        2. 📧 Usar esa fecha en el asunto del email
-        3. 📊 Generar el reporte completo con todos los candidatos analizados
+        2. 📊 **OBTENER DATOS:** Revisar el resultado de la tarea de procesamiento (processing_task) para obtener todos los datos de candidatos y evaluaciones
+        3. 📧 **ASUNTO DEL EMAIL:** 
+           - Si es análisis completo: "📊 Reporte de Evaluación de Candidatos - [FECHA]"
+           - Si es análisis filtrado: "📊 Reporte de Evaluación - [JD_INTERVIEW_NAME] (ID: [JD_INTERVIEW_ID]) - [FECHA]"
+        4. 🔍 **DETECTAR TIPO DE ANÁLISIS:** Revisar los datos de entrada para identificar si incluyen información de jd_interview (jd_interview_id, jd_interview_name, jd_interview_agent_id)
+        5. 📊 Generar el reporte completo con todos los candidatos analizados
         4. 📝 **ANÁLISIS CUALITATIVO:** En las secciones de habilidades y evaluación técnica, proporcionar análisis textuales detallados con comentarios sobre la forma de responder, ejemplos específicos y justificaciones fundamentadas
         5. 📝 **ANÁLISIS DE MATCHEO:** Debe ser un análisis textual breve de 1-2 líneas, sin puntajes numéricos, enfocado en la compatibilidad general del candidato con el puesto
         6. 🎯 **ENFOQUE PRINCIPAL:** Analizar la FORMA de responder del candidato, no solo el contenido, con comentarios detallados y justificaciones
@@ -466,6 +471,9 @@ def create_email_sending_task(agent, processing_task):
         FORMATO EXACTO REQUERIDO para cada candidato:
 
         📧 Asunto: 📊 Reporte de Evaluación de Candidatos - [FECHA_OBTENIDA_DE_LA_HERRAMIENTA]
+        
+        **SI ES ANÁLISIS FILTRADO POR JD_INTERVIEW_ID:**
+        📧 Asunto: 📊 Reporte de Evaluación - [JD_INTERVIEW_NAME] (ID: [JD_INTERVIEW_ID]) - [FECHA_OBTENIDA_DE_LA_HERRAMIENTA]
 
         👋 Estimado equipo de reclutamiento,
 
@@ -579,8 +587,468 @@ def create_email_sending_task(agent, processing_task):
         11. 🔄 Todos los campos entre corchetes deben ser reemplazados con datos reales
 
         ⚠️ **RESTRICCIÓN CRÍTICA:** Solo usar send_evaluation_email UNA VEZ por ejecución.
+        
+        🔧 **USO DE HERRAMIENTAS:**
+        1. Usar get_current_date() para obtener la fecha actual
+        2. Usar send_evaluation_email(subject, body) para enviar el email
+        3. El subject debe seguir el formato especificado arriba
+        4. El body debe contener todo el reporte formateado según el formato exacto
         """,
         expected_output="Confirmación del envío y copia del reporte completo formateado según el formato exacto especificado",
         agent=agent,
         context=[processing_task]
+    )
+
+def create_evaluation_saving_task(agent, processing_task, jd_interview_id: str = None):
+    """Tarea de guardado de evaluación en la base de datos"""
+    if jd_interview_id:
+        jd_instruction = f"""
+🚨 **ACCIÓN OBLIGATORIA - DEBES EJECUTAR ESTO:**
+El jd_interview_id es: {jd_interview_id}
+DEBES llamar a save_interview_evaluation con este ID. NO es opcional.
+"""
+    else:
+        jd_instruction = """
+⚠️ **IMPORTANTE:** No hay jd_interview_id disponible. Busca jd_interview_id en el full_report o en las tareas anteriores.
+Si no encuentras jd_interview_id, NO puedes guardar.
+"""
+    
+    return Task(
+        description=f"""💾 **TAREA CRÍTICA:** Procesar el resultado del análisis y guardar en interview_evaluations.
+
+{jd_instruction}
+
+🎯 **OBJETIVO:** Extraer datos del full_report y guardarlos en la base de datos ANTES de enviar el email.
+
+        📋 **PROCESO OBLIGATORIO:**
+        
+        1. 📊 **REVISAR RESULTADO DEL PROCESAMIENTO:**
+           - Obtener el resultado completo de la tarea de procesamiento (processing_task)
+           - Buscar el campo 'full_report' en el resultado
+           - Si no existe 'full_report', buscar 'report' o el objeto completo del resultado
+           - Si el resultado es un string, intentar parsearlo como JSON
+        
+        2. 🔍 **EXTRAER DATOS DEL FULL_REPORT:**
+           
+           **A) SUMMARY (Estructura específica requerida):**
+           - El summary DEBE tener esta estructura EXACTA:
+             {{
+               "kpis": {{
+                 "completed_interviews": número_de_candidatos,
+                 "avg_score": promedio_de_scores (float)
+               }},
+               "notes": "texto descriptivo de la evaluación"
+             }}
+           - Para calcular kpis:
+             * completed_interviews: cantidad total de candidatos evaluados
+             * avg_score: promedio de todos los scores de candidatos (suma de scores / cantidad)
+           - Para notes: crear un texto descriptivo como "Evaluación final de búsqueda [nombre] - [fecha]"
+           - ⚠️ IMPORTANTE: Esta es la estructura ÚNICA que debe tener el summary
+           - Si el full_report tiene información adicional, incluirla en el summary pero mantener esta estructura base
+           
+           **B) CANDIDATES (Objeto estructurado - FORMATO ÚNICO):**
+           - Buscar en el full_report el campo 'candidates' o buscar en 'conversations'/'meets'/'evaluations'
+           - Estructurar candidates como un objeto donde:
+             * Cada CLAVE es el candidate_id (UUID del candidato o meet_id) como STRING
+             * Cada VALOR es un objeto con EXACTAMENTE estos campos: {{"name": str, "score": int, "recommendation": str}}
+           - ⚠️ FORMATO EXACTO REQUERIDO (igual al ejemplo SQL):
+             {{
+               "cand-uuid-1": {{
+                 "name": "Francisco Sempé",
+                 "score": 82,
+                 "recommendation": "Favorable"
+               }},
+               "cand-uuid-2": {{
+                 "name": "Denis Perafán",
+                 "score": 74,
+                 "recommendation": "Condicional"
+               }}
+             }}
+           - Si candidates viene como lista, convertirla a objeto usando candidate_id como clave
+           - Buscar campos para candidate_id: candidate_id, id, meet_id, conversation_id
+           - Buscar score en: score, general_score, final_score, overall_score (convertir a int)
+           - Buscar recommendation en: recommendation, final_recommendation, final_decision, decision
+           - Mapear recommendation: "Recomendado" -> "Favorable", mantener otros valores
+           
+           **C) RANKING (Array ordenado - FORMATO ÚNICO):**
+           - Buscar en el full_report el campo 'ranking'
+           - Si no existe, construir el ranking ordenando candidates por score (de mayor a menor)
+           - ⚠️ FORMATO EXACTO REQUERIDO:
+             [
+               {{
+                 "candidate_id": "cand-uuid-1",
+                 "name": "Francisco Sempé",
+                 "score": 82,
+                 "analisis": "Análisis breve de matcheo del candidato",
+                 "nivel_matcheo": "EXCELENTE",
+                 "fortalezas_clave": ["Fortaleza 1", "Fortaleza 2", "Fortaleza 3"]
+               }},
+               {{
+                 "candidate_id": "cand-uuid-2",
+                 "name": "Denis Perafán",
+                 "score": 74,
+                 "analisis": "Análisis breve de matcheo del candidato",
+                 "nivel_matcheo": "BUENO",
+                 "fortalezas_clave": ["Fortaleza 1", "Fortaleza 2"]
+               }}
+             ]
+           - Cada objeto debe tener EXACTAMENTE estos campos:
+             * candidate_id (string): ID del candidato
+             * name (string): Nombre del candidato
+             * score (int): Score numérico
+             * analisis (string): Análisis breve de 1-2 líneas sobre el matcheo del candidato
+             * nivel_matcheo (string): "EXCELENTE", "BUENO", "MODERADO", o "DÉBIL"
+             * fortalezas_clave (array de strings): Lista de 2-4 fortalezas principales del candidato
+           - Buscar estos datos en:
+             * analisis: Campo 'analysis', 'match_analysis', 'analisis' en el full_report o en el análisis de matcheo del candidato
+             * nivel_matcheo: Campo 'nivel_matcheo', 'match_level', 'compatibility_level' o derivarlo del score
+             * fortalezas_clave: Campo 'strengths', 'fortalezas', 'fortalezas_clave' en el análisis del candidato
+           - Ordenar por score de mayor a menor
+           
+           **D) CANDIDATES_COUNT:**
+           - Contar la cantidad de candidatos en el objeto candidates
+           - Si candidates es dict: len(candidates.keys())
+           - Si candidates es list: len(candidates)
+        
+        3. 🔍 **OBTENER JD_INTERVIEW_ID:**
+           - PRIMERO: Usar el jd_interview_id proporcionado en esta descripción si está disponible
+           - SEGUNDO: Buscar jd_interview_id en el full_report (campo 'jd_interview_id' o 'jd_interview' con subcampo 'id')
+           - TERCERO: Buscar en las tareas anteriores (extraction_task) que pueden tener el jd_interview_id
+           - Si NO hay jd_interview_id disponible, NO guardar y retornar: "No se puede guardar: jd_interview_id no disponible"
+           - Si hay jd_interview_id, proceder con el guardado
+        
+        4. 💾 **GUARDAR EN BASE DE DATOS - ESTO ES OBLIGATORIO:**
+           ⚠️ **DEBES LLAMAR A save_interview_evaluation EXACTAMENTE UNA VEZ - NO LLAMES DOS VECES**
+           
+           Pasos EXACTOS:
+           a) Importar json si no está disponible
+           b) Convertir cada objeto a JSON string:
+              * summary_json = json.dumps(full_report_dict)
+              * candidates_json = json.dumps(candidates_dict)  
+              * ranking_json = json.dumps(ranking_list)
+           c) LLAMAR A LA HERRAMIENTA save_interview_evaluation UNA SOLA VEZ con estos parámetros EXACTOS:
+              - Si jd_interview_id está en esta descripción, usa ese valor EXACTAMENTE
+              - Si no está aquí, búscalo en el full_report
+              - Llamar: save_interview_evaluation(
+                  jd_interview_id=jd_interview_id_encontrado,
+                  summary=summary_json,
+                  candidates=candidates_json,
+                  ranking=ranking_json,
+                  candidates_count=candidates_count
+              )
+           d) ⚠️ CRÍTICO: 
+              - jd_interview_id debe ser un STRING
+              - summary, candidates, ranking deben ser STRINGS JSON (no objetos)
+              - candidates_count debe ser un INT
+              - DEBES usar la herramienta save_interview_evaluation, NO escribir código que intente guardar directamente
+              - ⚠️ LLAMAR SOLO UNA VEZ - después de llamar, retornar el resultado y TERMINAR
+        
+        5. ✅ **VERIFICAR RESULTADO:**
+           - Parsear la respuesta de save_interview_evaluation como JSON
+           - Verificar que el campo 'success' sea True
+           - Si success es True, retornar: "✅ Evaluación guardada exitosamente. Evaluation ID: [evaluation_id]"
+           - Si success es False, retornar: "❌ Error guardando: [error]"
+        
+        ⚠️ **REGLAS CRÍTICAS - FORMATO ÚNICO:**
+        1. El summary DEBE tener estructura: {{"kpis": {{"completed_interviews": int, "avg_score": float}}, "notes": string}}
+        2. Candidates DEBE ser objeto: {{"candidate-id": {{"name": str, "score": int, "recommendation": str}}, ...}}
+        3. Ranking DEBE ser array: [{{"candidate_id": str, "name": str, "score": int, "analisis": str, "nivel_matcheo": str, "fortalezas_clave": [str, ...]}}, ...]
+        4. DEBES usar la herramienta save_interview_evaluation - NO intentes guardar de otra forma
+        5. SIEMPRE convertir objetos a JSON strings con json.dumps() antes de llamar al tool
+        6. Si no hay jd_interview_id disponible, retornar: "❌ No se puede guardar: jd_interview_id no disponible"
+        7. Si hay jd_interview_id, DEBES llamar a save_interview_evaluation - no es opcional
+        
+        🔧 **PASOS OBLIGATORIOS:**
+        1. ✅ Revisar resultado de processing_task
+        2. ✅ Extraer full_report
+        3. ✅ Procesar candidates y ranking
+        4. ✅ Convertir a JSON strings
+        5. ✅ LLAMAR A save_interview_evaluation (OBLIGATORIO)
+        6. ✅ Retornar el resultado del guardado
+        
+        📝 **SALIDA REQUERIDA:**
+        Debes retornar el resultado de save_interview_evaluation. Si fue exitoso, mostrar el evaluation_id.
+        Si falló, mostrar el error específico.
+        """,
+        expected_output="Confirmación del guardado en interview_evaluations con evaluation_id o mensaje específico indicando por qué no se pudo guardar",
+        agent=agent,
+        context=[processing_task]
+    )
+
+def create_filtered_extraction_task(agent, jd_interview_id: str):
+    """Tarea de extracción de datos filtrada por jd_interview_id"""
+    return Task(
+        description=f"""
+        Extraer conversaciones filtradas por jd_interview_id: {jd_interview_id}
+        
+        Proceso:
+        1. Obtener jd_interview por ID: {jd_interview_id}
+        2. Buscar meets que tengan jd_interviews_id = {jd_interview_id}
+        3. Obtener conversaciones de esos meets específicos
+        
+        Incluir información relacionada de candidatos y meets usando los campos:
+        - candidate_id para enlazar con tabla candidates
+        - meet_id para enlazar con tabla meets
+        - jd_interview_id para contexto del filtro
+        
+        Asegurar que cada registro incluya:
+        - meet_id, candidate_id, conversation_data (campos específicos de conversations)
+        - Datos completos del candidato (id, name, email, phone, cv_url, tech_stack)
+        - Información del jd_interview (nombre, agent_id, email_source)
+        """,
+        expected_output=f"Lista JSON de conversaciones filtradas por jd_interview_id: {jd_interview_id} con toda la información relacionada. Si no hay conversaciones, incluir mensaje informativo: 'No se han presentado candidatos para esta entrevista'. IMPORTANTE: Incluir siempre la información del jd_interview (id, name, agent_id, email_source) para usar en el título del reporte.",
+        agent=agent
+    )
+
+def create_matching_task(agent):
+    """Tarea de matching de candidatos con entrevistas"""
+    return Task(
+        description="""
+        🎯 Realizar matching inteligente entre candidatos (tech_stack) y entrevistas (job_description).
+        
+        📊 **PROCESO DE MATCHING:**
+        
+        1. 📋 **Obtener Datos de Candidatos:**
+           - Usar get_candidates_data() para obtener todos los candidatos
+           - Extraer el campo tech_stack de cada candidato
+           - Obtener información básica (id, name, email, phone, cv_url)
+        
+        2. 📋 **Obtener Datos de Entrevistas:**
+           - Usar get_all_jd_interviews() para obtener TODAS las entrevistas
+           - Extraer los campos interview_name y job_description
+           - Obtener información del agente asignado (agent_id)
+        
+        3. 🔍 **Análisis de Compatibilidad:**
+           Para cada candidato, analizar contra cada entrevista:
+           - Comparar tech_stack del candidato con job_description de la entrevista
+           - Identificar tecnologías exactas mencionadas en ambos
+           - Identificar tecnologías relacionadas o complementarias
+           - Detectar gaps importantes en el tech_stack del candidato
+           - Calcular score de compatibilidad (0-100%)
+        
+        4. 📊 **Criterios de Evaluación:**
+           - **Coincidencias Exactas (peso 40%):** Tecnologías que aparecen exactamente en ambos
+           - **Coincidencias Relacionadas (peso 30%):** Frameworks, librerías o herramientas relacionadas
+           - **Tecnologías Complementarias (peso 20%):** Skills que complementan el stack requerido
+           - **Gaps Críticos (peso -10%):** Tecnologías esenciales que faltan en el candidato
+        
+        5. 🎯 **Generar Resultados SIMPLIFICADOS:**
+           - SOLO mostrar candidatos que tengan matches (score > 0)
+           - Para cada candidato con matches, incluir:
+             * Datos completos del candidato (id, name, email, phone, cv_url, tech_stack)
+             * Lista de entrevistas que coinciden con sus datos
+             * Para cada entrevista: registro completo de jd_interviews (id, interview_name, agent_id, job_description, email_source, created_at) + score de compatibilidad + análisis del match
+        
+        6. 📝 **Formato de Salida SIMPLIFICADO:**
+           ```json
+           {
+             "matches": [
+               {
+                 "candidate": {
+                   "id": "123",
+                   "name": "Juan Pérez",
+                   "email": "juan@email.com",
+                   "phone": "+1234567890",
+                   "cv_url": "https://s3.../cv.pdf",
+                   "tech_stack": ["React", "JavaScript", "Node.js"]
+                 },
+                 "matching_interviews": [
+                   {
+                     "jd_interviews": {
+                       "id": "456",
+                       "interview_name": "Desarrollador React Senior",
+                       "agent_id": "agent_123",
+                       "job_description": "Buscamos desarrollador con React, JavaScript...",
+                       "email_source": "recruiting@company.com",
+                       "created_at": "2025-01-18T10:30:00Z"
+                     },
+                     "compatibility_score": 85,
+                     "match_analysis": "Excelente match con React y JavaScript..."
+                   }
+                 ]
+               }
+             ]
+           }
+           ```
+        
+        ⚠️ **IMPORTANTE:** 
+        - Solo incluir candidatos que tengan al menos un match (score > 0)
+        - Todo el análisis debe estar en ESPAÑOL LATINO
+        - Utiliza terminología de recursos humanos en español de América Latina
+        - Si no hay matches, retornar: {"matches": []}
+        - **CRÍTICO**: La respuesta debe ser SOLO JSON válido, sin texto adicional
+        - **CRÍTICO**: No incluir explicaciones fuera del JSON
+        - **CRÍTICO**: El JSON debe empezar con { y terminar con }
+        """,
+        expected_output="SOLO JSON válido con estructura: {'matches': [{'candidate': {...}, 'matching_interviews': [{'jd_interviews': {...}, 'compatibility_score': X, 'match_analysis': '...'}]}]}",
+        agent=agent
+    )
+
+def create_single_meet_extraction_task(agent, meet_id: str):
+    """Tarea de extracción de datos de un meet específico"""
+    return Task(
+        description=f"""
+        Extraer todos los datos necesarios para evaluar el meet con ID: {meet_id}
+        
+        Debes obtener:
+        - Información completa del meet (id, jd_interviews_id, fechas)
+        - Conversación asociada al meet (conversation_data)
+        - Datos completos del candidato (id, name, email, phone, cv_url, tech_stack)
+        - Información del JD interview asociado (id, interview_name, agent_id, job_description, email_source)
+        
+        Usar get_meet_evaluation_data(meet_id="{meet_id}") para obtener todos los datos.
+        """,
+        expected_output="JSON completo con meet, conversation, candidate y jd_interview",
+        agent=agent
+    )
+
+def create_single_meet_evaluation_task(agent, extraction_task):
+    """Tarea de evaluación completa de un solo meet"""
+    return Task(
+        description="""
+        🔍 Realizar una evaluación exhaustiva y detallada de UNA SOLA entrevista (meet) para determinar 
+        si el candidato es un posible match basado en la JD del meet.
+        
+        📋 **PROCESO DE EVALUACIÓN:**
+        
+        ## 1. 📊 **ANÁLISIS DE LA CONVERSACIÓN**
+        Realizar un análisis exhaustivo similar al análisis estándar pero enfocado en un solo candidato:
+        
+        ### Habilidades Blandas - Análisis Cualitativo:
+        - **Comunicación**: Comentario detallado con ejemplos específicos
+        - **Liderazgo**: Análisis de iniciativa y toma de decisiones
+        - **Trabajo en Equipo**: Evaluación de colaboración
+        - **Adaptabilidad**: Flexibilidad y manejo de cambios
+        - **Resolución de Problemas**: Pensamiento crítico y creatividad
+        - **Gestión del Tiempo**: Organización y priorización
+        - **Inteligencia Emocional**: Autoconciencia y empatía
+        - **Aprendizaje Continuo**: Curiosidad y disposición a crecer
+        
+        ### Aspectos Técnicos - Análisis Detallado:
+        - **Conocimientos Técnicos**: Nivel demostrado con ejemplos específicos
+        - **Experiencia Práctica**: Evidencia de experiencia real
+        - **Análisis Obligatorio de Preguntas Técnicas**:
+          * Identificar EXACTAMENTE todas las preguntas técnicas
+          * Para cada pregunta: copiar texto exacto, verificar si fue contestada (SÍ/NO/PARCIALMENTE)
+          * Copiar respuesta exacta del candidato
+          * Evaluar calidad técnica de cada respuesta
+          * Crear resumen: [X/Y completamente contestadas, X/Y parcialmente, X/Y no contestadas]
+          * Si hay preguntas sin contestar, generar ALERTA CRÍTICA
+        
+        ## 2. 📋 **ANÁLISIS DE LA JD**
+        Analizar la job_description del JD interview asociado:
+        - Extraer requisitos técnicos específicos
+        - Identificar tecnologías y stack requerido
+        - Extraer requisitos de experiencia
+        - Identificar habilidades blandas esperadas
+        - Determinar nivel de seniority requerido
+        
+        ## 3. 🎯 **COMPARACIÓN Y DETERMINACIÓN DE MATCH**
+        Comparar el análisis del candidato con los requisitos de la JD:
+        
+        ### Comparación Técnica:
+        - Coincidencias exactas con tecnologías requeridas
+        - Coincidencias parciales o relacionadas
+        - Gaps críticos en tecnologías requeridas
+        - Tecnologías complementarias del candidato
+        - Nivel de conocimiento vs nivel requerido
+        
+        ### Comparación de Habilidades Blandas:
+        - Evaluar cada habilidad blanda vs lo requerido
+        - Identificar fortalezas sobresalientes
+        - Identificar áreas de mejora relevantes
+        
+        ### Evaluación de Experiencia:
+        - Experiencia práctica vs experiencia requerida
+        - Proyectos mencionados vs tipo de proyectos requeridos
+        - Nivel de seniority demostrado vs requerido
+        
+        ## 4. ✅ **DETERMINACIÓN FINAL DE MATCH**
+        Basado en todo el análisis, determinar:
+        - **¿Es un posible match?** (SÍ/NO/CONDICIONAL)
+        - **Score de compatibilidad** (0-100%)
+        - **Justificación detallada** de la decisión
+        - **Fortalezas principales** que apoyan el match
+        - **Áreas de preocupación** o gaps importantes
+        - **Recomendación final** (Recomendado/Condicional/No Recomendado)
+        
+        ## FORMATO DE SALIDA JSON:
+        ```json
+        {{
+          "meet_id": "string",
+          "candidate": {{
+            "id": "string",
+            "name": "string",
+            "email": "string",
+            "tech_stack": "string"
+          }},
+          "jd_interview": {{
+            "id": "string",
+            "interview_name": "string",
+            "job_description": "string"
+          }},
+          "conversation_analysis": {{
+            "soft_skills": {{
+              "communication": "comentario detallado",
+              "leadership": "comentario detallado",
+              "teamwork": "comentario detallado",
+              "adaptability": "comentario detallado",
+              "problem_solving": "comentario detallado",
+              "time_management": "comentario detallado",
+              "emotional_intelligence": "comentario detallado",
+              "continuous_learning": "comentario detallado"
+            }},
+            "technical_assessment": {{
+              "knowledge_level": "Básico/Intermedio/Avanzado/Experto",
+              "practical_experience": "Limitada/Moderada/Amplia/Extensa",
+              "technical_questions": [
+                {{
+                  "question": "texto exacto de la pregunta",
+                  "answered": "SÍ/NO/PARCIALMENTE",
+                  "answer": "respuesta exacta del candidato",
+                  "evaluation": "análisis detallado"
+                }}
+              ],
+              "completeness_summary": {{
+                "total_questions": X,
+                "fully_answered": X,
+                "partially_answered": X,
+                "not_answered": X
+              }},
+              "alerts": ["alertas críticas si las hay"]
+            }}
+          }},
+          "jd_analysis": {{
+            "required_technologies": ["tech1", "tech2"],
+            "experience_level_required": "Junior/Mid/Senior",
+            "soft_skills_required": ["skill1", "skill2"]
+          }},
+          "match_evaluation": {{
+            "is_potential_match": true/false,
+            "compatibility_score": 0-100,
+            "technical_match": {{
+              "exact_matches": ["tech1", "tech2"],
+              "partial_matches": ["tech3"],
+              "critical_gaps": ["tech4"],
+              "complementary_skills": ["tech5"]
+            }},
+            "soft_skills_match": "análisis comparativo",
+            "experience_match": "análisis comparativo",
+            "strengths": ["fortaleza1", "fortaleza2"],
+            "concerns": ["preocupación1", "preocupación2"],
+            "final_recommendation": "Recomendado/Condicional/No Recomendado",
+            "justification": "justificación detallada de la decisión"
+          }}
+        }}
+        ```
+        
+        IMPORTANTE: 
+        - Ser exhaustivo pero conciso
+        - Basar todas las evaluaciones en evidencia específica
+        - Todo el análisis en ESPAÑOL LATINO
+        - Proporcionar justificaciones claras para la determinación de match
+        """,
+        expected_output="JSON completo con análisis exhaustivo y determinación de match potencial",
+        agent=agent,
+        context=[extraction_task]
     )
