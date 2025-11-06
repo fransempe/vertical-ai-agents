@@ -209,15 +209,34 @@ def send_evaluation_email(subject: str, body: str) -> str:
         }
         
         evaluation_logger.log_task_progress("Envío de Email", f"Enviando a {to_email} via {email_api_url}")
+        print(f"📧 Enviando email a {to_email} via {email_api_url}")
+        print(f"📋 Subject: {subject[:50]}...")
         
-        response = requests.post(
-            email_api_url,
-            json=payload,
-            headers={'Content-Type': 'application/json'},
-            timeout=30
-        )
-        
-        response.raise_for_status()
+        try:
+            response = requests.post(
+                email_api_url,
+                json=payload,
+                headers={'Content-Type': 'application/json'},
+                timeout=30
+            )
+            print(f"📊 Response status: {response.status_code}")
+            print(f"📊 Response body: {response.text[:200]}")
+            
+            response.raise_for_status()
+        except requests.exceptions.ConnectionError as ce:
+            print(f"❌ ERROR DE CONEXIÓN: No se pudo conectar a {email_api_url}")
+            print(f"❌ Detalle: {str(ce)}")
+            raise
+        except requests.exceptions.Timeout as te:
+            print(f"❌ ERROR DE TIMEOUT: La petición tardó más de 30 segundos")
+            print(f"❌ Detalle: {str(te)}")
+            raise
+        except requests.exceptions.HTTPError as he:
+            print(f"❌ ERROR HTTP: {he.response.status_code if he.response else 'Sin respuesta'}")
+            print(f"❌ Detalle: {str(he)}")
+            if he.response:
+                print(f"❌ Response body: {he.response.text[:500]}")
+            raise
         
         evaluation_logger.log_email_sent(to_email, subject, "success")
         evaluation_logger.log_task_complete("Envío de Email", f"Email enviado exitosamente con código {response.status_code}")
@@ -349,38 +368,73 @@ def get_jd_interviews_data(interview_id: str = None) -> str:
         interview_id: ID específico de la entrevista (opcional, si no se proporciona obtiene todas)
         
     Returns:
-        JSON string con los datos de jd_interviews
+        JSON string con los datos de jd_interviews (job_description truncado a 5000 chars para evitar tokens)
     """
     try:
-        evaluation_logger.log_task_start("Obtener JD Interview Data", "JD Interview Data Extractor")
+        evaluation_logger.log_task_start("Obtener JD Interview Data", f"JD Interview Data Extractor - ID: {interview_id or 'ALL'}")
+        print(f"📊 get_jd_interviews_data - interview_id: {interview_id or 'ALL'}")
         
         url = os.getenv("SUPABASE_URL")
         key = os.getenv("SUPABASE_KEY")
+        
+        if not url or not key:
+            error_msg = "SUPABASE_URL o SUPABASE_KEY no configurados"
+            print(f"❌ {error_msg}")
+            evaluation_logger.log_error("Obtener JD Interview Data", error_msg)
+            return json.dumps({"error": error_msg}, indent=2)
+        
         supabase = create_client(url, key)
         
+        print(f"📊 Consultando tabla jd_interviews...")
         if interview_id:
-            response = supabase.table('jd_interviews').select('*').eq('id', interview_id).execute()
+            response = supabase.table('jd_interviews').select('*').eq('id', interview_id).limit(1).execute()
         else:
-            response = supabase.table('jd_interviews').select('*').execute()
+            # Limitar a 50 registros para evitar respuestas muy grandes
+            response = supabase.table('jd_interviews').select('*').limit(50).execute()
+        
+        if not response.data:
+            msg = f"No se encontraron registros" + (f" con ID: {interview_id}" if interview_id else "")
+            print(f"⚠️ {msg}")
+            evaluation_logger.log_task_progress("Obtener JD Interview Data", msg)
+            return json.dumps([], indent=2)
         
         interviews = []
         for row in response.data:
+            job_desc = row.get('job_description', '')
+            # Truncar job_description a 5000 caracteres para evitar problemas de tokens
+            if job_desc and len(job_desc) > 5000:
+                job_desc = job_desc[:5000] + "... [truncado]"
+            
             interview = {
                 "id": row.get('id'),
                 "interview_name": row.get('interview_name'),
                 "agent_id": row.get('agent_id'),
-                "job_description": row.get('job_description'),
-                "email_source": row.get('email_source'),
+                "job_description": job_desc,  # Truncado si es muy largo
+                "client_id": row.get('client_id'),
                 "created_at": row.get('created_at')
             }
             interviews.append(interview)
         
-        evaluation_logger.log_task_complete("Obtener JD Interview Data", f"{len(interviews)} registros obtenidos")
-        return json.dumps(interviews, indent=2)
+        result_json = json.dumps(interviews, indent=2)
+        result_size = len(result_json)
+        
+        print(f"✅ {len(interviews)} registro(s) obtenido(s) - Tamaño respuesta: {result_size} chars")
+        evaluation_logger.log_task_complete("Obtener JD Interview Data", f"{len(interviews)} registros obtenidos ({result_size} chars)")
+        
+        # Si la respuesta es muy grande, advertir
+        if result_size > 100000:
+            print(f"⚠️ ADVERTENCIA: Respuesta muy grande ({result_size} chars), puede causar problemas de tokens")
+        
+        return result_json
         
     except Exception as e:
-        evaluation_logger.log_error("Obtener JD Interview Data", f"Error obteniendo datos: {str(e)}")
-        return json.dumps({"error": f"Error obteniendo datos de jd_interviews: {str(e)}"}, indent=2)
+        error_msg = f"Error obteniendo datos: {str(e)}"
+        print(f"❌ {error_msg}")
+        print(f"❌ Tipo de error: {type(e).__name__}")
+        import traceback
+        print(f"❌ Traceback: {traceback.format_exc()[:500]}")
+        evaluation_logger.log_error("Obtener JD Interview Data", error_msg)
+        return json.dumps({"error": error_msg, "type": type(e).__name__}, indent=2)
 
 @tool
 def get_current_date() -> str:

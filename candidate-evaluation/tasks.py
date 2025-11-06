@@ -4,6 +4,8 @@ def create_extraction_task(agent):
     """Tarea de extracción de datos"""
     return Task(
         description="""
+        ⏱️ Antes de comenzar, imprime: START EXTRACTION [YYYY-MM-DD HH:MM:SS]. Al finalizar, imprime: END EXTRACTION [YYYY-MM-DD HH:MM:SS].
+
         Extraer todas las conversaciones de la base de datos Supabase.
         Incluir información relacionada de candidatos y meets usando los campos:
         - candidate_id para enlazar con tabla candidates
@@ -21,7 +23,15 @@ def create_analysis_task(agent, extraction_task):
     """Tarea de análisis de conversaciones"""
     return Task(
         description="""
+        ⏱️ Antes de comenzar, imprime: START ANALYSIS [YYYY-MM-DD HH:MM:SS]. Al finalizar, imprime: END ANALYSIS [YYYY-MM-DD HH:MM:SS].
+
         🔍 Realizar un análisis exhaustivo, detallado y cualitativo del campo conversation_data de cada conversación extraída.
+
+        REGLAS DE RIGOR DE DATOS (CRÍTICO):
+        - SOLO puedes usar información presente en los datos de entrada (contexto y conversation_data de la BD).
+        - NO inventes nombres, emails, tech_stacks ni datos de candidatos. Si un dato no está, deja "N/A".
+        - Cuando cites fragmentos, cópialos exactamente del conversation_data.
+        - Si faltan campos requeridos, repórtalos explícitamente sin crear contenido.
         
         📋 **ENFOQUE PRINCIPAL:** Analizar la FORMA de responder del candidato, no solo el contenido.
         Proporcionar comentarios detallados y justificaciones fundamentadas para cada evaluación.
@@ -261,7 +271,14 @@ def create_job_analysis_task(agent, extraction_task):
     """Tarea de análisis de descripciones de trabajo"""
     return Task(
         description="""
+        ⏱️ Antes de comenzar, imprime: START JOB_ANALYSIS [YYYY-MM-DD HH:MM:SS]. Al finalizar, imprime: END JOB_ANALYSIS [YYYY-MM-DD HH:MM:SS].
+
         📄 Analizar las descripciones de trabajo obtenidas de la tabla jd_interviews para evaluación dinámica.
+
+        REGLAS DE RIGOR DE DATOS (CRÍTICO):
+        - Usa EXCLUSIVAMENTE los campos obtenidos de la BD (get_all_jd_interviews / get_jd_interviews_data).
+        - NO inventes tecnologías ni requisitos si no están en el job_description.
+        - Si un campo no aparece, repórtalo como "N/A" sin inferir.
         
         🔍 **PROCESO DE ANÁLISIS:**
         Para cada registro en jd_interviews:
@@ -308,7 +325,14 @@ def create_candidate_job_comparison_task(agent, extraction_task, analysis_task, 
     """Tarea de comparación candidato vs descripción de trabajo"""
     return Task(
         description="""
+        ⏱️ Antes de comenzar, imprime: START COMPARISON [YYYY-MM-DD HH:MM:SS]. Al finalizar, imprime: END COMPARISON [YYYY-MM-DD HH:MM:SS].
+
         🎯 Realizar análisis de matcheo entre candidatos y descripciones de trabajo desde Google Docs.
+
+        REGLAS DE RIGOR DE DATOS (CRÍTICO):
+        - El nombre del candidato, email, tech_stack DEBEN salir de los datos obtenidos de la BD.
+        - El análisis de matcheo DEBE basarse en job_description y tech_stack extraídos, sin suponer datos.
+        - Si faltan datos, reportar claramente y continuar sin inventar.
         
         📊 **PROCESO DE COMPARACIÓN:**
         Para cada candidato y su job description correspondiente:
@@ -352,9 +376,16 @@ def create_processing_task(agent, extraction_task, analysis_task, job_analysis_t
     """Tarea de procesamiento final"""
     return Task(
         description="""
+        ⏱️ Antes de comenzar, imprime: START PROCESSING [YYYY-MM-DD HH:MM:SS]. Al finalizar, imprime: END PROCESSING [YYYY-MM-DD HH:MM:SS].
+
         Combinar todos los análisis realizados para crear DOS SALIDAS:
         1. Un reporte JSON completo con todos los datos
         2. Un reporte formateado en texto siguiendo el formato específico requerido
+
+        REGLAS DE RIGOR DE DATOS (CRÍTICO):
+        - El reporte DEBE estar 100% fundamentado en los datos de entrada (extraction_task, job_analysis, comparison).
+        - NO agregues candidatos ni campos que no existan en los datos provenientes de la BD.
+        - Si algún campo falta, usa "N/A"; no lo inventes.
         
         ## PRIMERA SALIDA - Reporte JSON completo:
         El reporte debe incluir para cada conversación:
@@ -442,6 +473,8 @@ def create_email_sending_task(agent, processing_task):
     """Tarea de envío de email con resultados"""
     return Task(
         description="""
+        ⏱️ Antes de comenzar, imprime: START EMAIL_SENDING [YYYY-MM-DD HH:MM:SS]. Al finalizar, imprime: END EMAIL_SENDING [YYYY-MM-DD HH:MM:SS].
+
         🚀 Generar y enviar OBLIGATORIAMENTE un reporte final de evaluación de candidatos siguiendo EXACTAMENTE el formato especificado.
 
         ⚠️ **IMPORTANTE:** Este reporte es OBLIGATORIO y debe generarse SIEMPRE. Enviar SOLAMENTE UN EMAIL.
@@ -586,7 +619,10 @@ def create_email_sending_task(agent, processing_task):
         10. 📅 La fecha debe ser la actual en formato DD/MM/YYYY
         11. 🔄 Todos los campos entre corchetes deben ser reemplazados con datos reales
 
-        ⚠️ **RESTRICCIÓN CRÍTICA:** Solo usar send_evaluation_email UNA VEZ por ejecución.
+        ⚠️ **RESTRICCIÓN CRÍTICA:**
+        - Debes llamar a send_evaluation_email(subject, body) EXACTAMENTE UNA VEZ.
+        - El body DEBE construirse SOLO con datos provenientes del processing_task (derivados de la BD).
+        - NO inventes nombres ni datos. Si faltan, muestra "N/A".
         
         🔧 **USO DE HERRAMIENTAS:**
         1. Usar get_current_date() para obtener la fecha actual
@@ -779,6 +815,8 @@ def create_filtered_extraction_task(agent, jd_interview_id: str):
     """Tarea de extracción de datos filtrada por jd_interview_id"""
     return Task(
         description=f"""
+        ⏱️ Antes de comenzar, imprime: START FILTERED_EXTRACTION [YYYY-MM-DD HH:MM:SS]. Al finalizar, imprime: END FILTERED_EXTRACTION [YYYY-MM-DD HH:MM:SS].
+
         Extraer conversaciones filtradas por jd_interview_id: {jd_interview_id}
         
         Proceso:
@@ -804,6 +842,8 @@ def create_matching_task(agent):
     """Tarea de matching de candidatos con entrevistas"""
     return Task(
         description="""
+        ⏱️ Antes de comenzar, imprime: START MATCHING [YYYY-MM-DD HH:MM:SS]. Al finalizar, imprime: END MATCHING [YYYY-MM-DD HH:MM:SS].
+
         🎯 Realizar matching inteligente entre candidatos (tech_stack) y entrevistas (job_description).
         
         📊 **PROCESO DE MATCHING:**
@@ -888,6 +928,8 @@ def create_single_meet_extraction_task(agent, meet_id: str):
     """Tarea de extracción de datos de un meet específico"""
     return Task(
         description=f"""
+        ⏱️ Antes de comenzar, imprime: START SINGLE_MEET_EXTRACTION [YYYY-MM-DD HH:MM:SS]. Al finalizar, imprime: END SINGLE_MEET_EXTRACTION [YYYY-MM-DD HH:MM:SS].
+
         Extraer todos los datos necesarios para evaluar el meet con ID: {meet_id}
         
         Debes obtener:
@@ -906,6 +948,8 @@ def create_single_meet_evaluation_task(agent, extraction_task):
     """Tarea de evaluación completa de un solo meet"""
     return Task(
         description="""
+        ⏱️ Antes de comenzar, imprime: START SINGLE_MEET_EVALUATION [YYYY-MM-DD HH:MM:SS]. Al finalizar, imprime: END SINGLE_MEET_EVALUATION [YYYY-MM-DD HH:MM:SS].
+
         🔍 Realizar una evaluación exhaustiva y detallada de UNA SOLA entrevista (meet) para determinar 
         si el candidato es un posible match basado en la JD del meet.
         

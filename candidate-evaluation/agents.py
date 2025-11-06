@@ -8,11 +8,25 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Configurar el modelo de OpenAI
-llm = ChatOpenAI(
-    model="gpt-4o-mini", #"gpt-4o-mini",
+FAST = ChatOpenAI(
+    model="gpt-4o-mini",
     api_key=os.getenv("OPENAI_API_KEY"),
-    temperature=0.1
+    temperature=0.0,
+    #max_tokens=700, 
+    timeout=40,      
+    max_retries=1
 )
+
+FINAL = ChatOpenAI(
+    model="gpt-4o",
+    api_key=os.getenv("OPENAI_API_KEY"),
+    temperature=0.1,
+    #max_tokens=2200,   
+    timeout=60,
+    max_retries=1
+)
+
+common_agent_kwargs = dict(verbose=False, max_iter=1, allow_delegation=False, memory=False)
 
 def create_data_extractor_agent():
     """Crea el agente extractor de datos"""
@@ -21,10 +35,12 @@ def create_data_extractor_agent():
         goal="Extraer datos de conversaciones desde Supabase incluyendo información de candidates y meets",
         backstory="""Eres un especialista en extracción de datos con experiencia en bases de datos.
         Tu trabajo es obtener información completa de la tabla conversations, asegurándote de incluir
-        todos los datos relacionados al candidato y a la tabla meets mediante joins correctos.""",
+        todos los datos relacionados al candidato y a la tabla meets mediante joins correctos.
+        
+        **TL;DR:** Sé conciso. Extrae solo datos necesarios. Evita explicaciones largas.""",
         tools=[extract_supabase_conversations],
-        verbose=False,
-        llm=llm
+        **common_agent_kwargs,
+        llm=FAST
     )
 
 def create_filtered_data_extractor_agent():
@@ -35,10 +51,12 @@ def create_filtered_data_extractor_agent():
         backstory="""Eres un especialista en extracción de datos filtrados con experiencia en bases de datos.
         Tu trabajo es obtener información específica de conversaciones filtradas por jd_interview_id,
         siguiendo el flujo: jd_interview -> meets -> conversations, asegurándote de incluir
-        todos los datos relacionados al candidato, meets y jd_interview mediante joins correctos.""",
+        todos los datos relacionados al candidato, meets y jd_interview mediante joins correctos.
+        
+        **TL;DR:** Extrae solo lo necesario. Responde directo sin preámbulos.""",
         tools=[get_conversations_by_jd_interview],
-        verbose=False,
-        llm=llm
+        **common_agent_kwargs,
+        llm=FAST,
     )
 
 def create_conversation_analyzer_agent():
@@ -75,9 +93,11 @@ def create_conversation_analyzer_agent():
         6. Si hay preguntas sin contestar, generar ALERTA CRÍTICA especificando exactamente cuáles son
         7. Evaluar la calidad técnica de cada respuesta y el nivel de conocimiento en la tecnología específica demostrado.
 
-        Tu objetivo es proporcionar evaluaciones exhaustivas y cualitativas que ayuden a tomar decisiones de contratación informadas y justas.""",
-        verbose=False,
-        llm=llm
+        Tu objetivo es proporcionar evaluaciones exhaustivas y cualitativas que ayuden a tomar decisiones de contratación informadas y justas.
+        
+        **TL;DR:** Mantén análisis concisos. Usa bullet points. Evita repeticiones. Solo información esencial.""",
+        **common_agent_kwargs,
+        llm=FAST,
     )
 
 def create_job_description_analyzer_agent():
@@ -102,10 +122,12 @@ def create_job_description_analyzer_agent():
         sin puntajes numéricos detallados.
         
         IMPORTANTE: Todas tus respuestas y análisis deben ser en ESPAÑOL LATINO.
-        Utiliza terminología de recursos humanos y análisis laboral en español de América Latina.""",
+        Utiliza terminología de recursos humanos y análisis laboral en español de América Latina.
+        
+        **TL;DR:** Responde breve y directo. Solo análisis esencial, sin texto innecesario.""",
         tools=[get_jd_interviews_data],
-        verbose=True,
-        llm=llm
+        **common_agent_kwargs,
+        llm=FAST,
     )
 
 def create_data_processor_agent():
@@ -115,9 +137,11 @@ def create_data_processor_agent():
         goal="Coordinar el procesamiento completo y generar reportes finales estructurados",
         backstory="""Eres un coordinador experto en procesamiento de datos que combina información
         de múltiples fuentes. Tu trabajo es asegurar que todos los datos se procesen correctamente
-        y generar reportes finales bien estructurados.""",
-        verbose=False,
-        llm=llm
+        y generar reportes finales bien estructurados.
+        
+        **TL;DR:** Combina datos eficientemente. Genera reportes concisos. Sin texto redundante.""",
+        **common_agent_kwargs,
+        llm=FAST,
     )
 
 def create_evaluation_saver_agent():
@@ -138,12 +162,12 @@ def create_evaluation_saver_agent():
         - El summary debe tener estructura: {{"kpis": {{"completed_interviews": int, "avg_score": float}}, "notes": string}}
         - Si hay jd_interview_id, DEBES guardar - no es opcional
         - Si no hay jd_interview_id, retorna mensaje claro de por qué no se puede guardar
-        - Después de llamar a save_interview_evaluation, retorna el resultado y TERMINA""",
+        - Después de llamar a save_interview_evaluation, retorna el resultado y TERMINA
+        
+        **TL;DR:** Extrae y guarda. Una llamada. Responde solo confirmación. Sin explicaciones largas.""",
         tools=[save_interview_evaluation, get_jd_interviews_data],
-        verbose=True,
-        llm=llm,
-        max_iter=3,
-        allow_delegation=False
+        **common_agent_kwargs,
+        llm=FAST
     )
 
 def create_email_sender_agent():
@@ -192,10 +216,12 @@ def create_email_sender_agent():
         ❌ Ejemplo incorrecto: "💬 Comunicación: 8 (colocar el puntaje de 0 a 10)"
         
         IMPORTANTE: Todo el contenido del email debe estar en ESPAÑOL LATINO.
-        Utiliza un lenguaje profesional y claro en español de América Latina.""",
+        Utiliza un lenguaje profesional y claro en español de América Latina.
+        
+        **TL;DR:** Email completo pero estructurado. Sin redundancias. Contenido esencial bien formateado.""",
         tools=[send_evaluation_email, get_current_date],
-        verbose=True,
-        llm=llm
+        **common_agent_kwargs,
+        llm=FINAL,
     )
 
 def create_candidate_matching_agent():
@@ -233,10 +259,12 @@ def create_candidate_matching_agent():
         - Potencial de aprendizaje y adaptación
         
         IMPORTANTE: Todo el análisis debe estar en ESPAÑOL LATINO.
-        Utiliza terminología de recursos humanos en español de América Latina.""",
+        Utiliza terminología de recursos humanos en español de América Latina.
+        
+        **TL;DR:** Análisis conciso. Solo scores y matches esenciales. Sin texto innecesario.""",
         tools=[get_candidates_data, get_all_jd_interviews],
-        verbose=True,
-        llm=llm
+        **common_agent_kwargs,
+        llm=FAST,
     )
 
 def create_single_meet_evaluator_agent():
@@ -264,8 +292,10 @@ def create_single_meet_evaluator_agent():
         5. Determinación final de match potencial
         
         Tu objetivo es proporcionar una evaluación completa y justificada que determine si el candidato 
-        es un posible match para el puesto descrito en la JD.""",
+        es un posible match para el puesto descrito en la JD.
+        
+        **TL;DR:** Evalúa conciso. Solo conclusiones clave y justificación breve. Sin explicaciones largas.""",
         tools=[get_meet_evaluation_data, fetch_job_description],
-        verbose=True,
-        llm=llm
+        **common_agent_kwargs,  
+        llm=FAST,
     )

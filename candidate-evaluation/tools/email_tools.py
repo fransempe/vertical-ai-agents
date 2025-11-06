@@ -620,6 +620,8 @@ class GraphEmailMonitor:
                 "body": body
             }
 
+            print(f"📧 Enviando status email a {to_email} via {email_api_url}")
+            print(f"📋 Subject: {subject[:50]}...")
             try:
                 response = requests.post(
                     email_api_url,
@@ -627,10 +629,32 @@ class GraphEmailMonitor:
                     headers={'Content-Type': 'application/json'},
                     timeout=30
                 )
+                print(f"📊 Response status: {response.status_code}")
+                print(f"📊 Response body: {response.text[:200]}")
+                
                 response.raise_for_status()
                 evaluation_logger.log_task_complete("Status Overview Email", f"Email enviado a {to_email}")
+                print(f"✅ Email de status enviado exitosamente a {to_email}")
                 return True
+            except requests.exceptions.ConnectionError as ce:
+                print(f"❌ ERROR DE CONEXIÓN: No se pudo conectar a {email_api_url}")
+                print(f"❌ Detalle: {str(ce)}")
+                evaluation_logger.log_error("Status Overview Email", f"Error de conexión: {str(ce)}")
+                return False
+            except requests.exceptions.Timeout as te:
+                print(f"❌ ERROR DE TIMEOUT: La petición tardó más de 30 segundos")
+                print(f"❌ Detalle: {str(te)}")
+                evaluation_logger.log_error("Status Overview Email", f"Error de timeout: {str(te)}")
+                return False
+            except requests.exceptions.HTTPError as he:
+                print(f"❌ ERROR HTTP: {he.response.status_code if he.response else 'Sin respuesta'}")
+                print(f"❌ Detalle: {str(he)}")
+                if he.response:
+                    print(f"❌ Response body: {he.response.text[:500]}")
+                evaluation_logger.log_error("Status Overview Email", f"Error HTTP: {str(he)}")
+                return False
             except requests.exceptions.RequestException as e:
+                print(f"❌ ERROR DE PETICIÓN: {str(e)}")
                 evaluation_logger.log_error("Status Overview Email", f"Error enviando email: {str(e)}")
                 return False
 
@@ -701,7 +725,7 @@ class GraphEmailMonitor:
                 f"A continuación te compartimos el estado de la búsqueda:\n\n"
                 f"🏢 Cliente: {client_name} ({client_email})\n"
                 f"👤 Responsable: {client_resp}   ☎️ {client_phone}\n"
-                f"🗂️ Entrevista: {interview_name}   🆔 {jd_interview_id}\n"
+                f"🗂️ Búsqueda: {interview_name}   🆔 {jd_interview_id}\n"
                 f"👥 Candidatos: {candidates_count if candidates_count is not None else 'N/A'}\n"
             )
 
@@ -1119,14 +1143,14 @@ class GraphEmailMonitor:
     def send_confirmation_email(self, to_email: str, interview_name: str, agent_name: str, 
                               agent_id: str, interview_id: str, success: bool = True) -> bool:
         """
-        Envía un email de confirmación al emisor notificando la creación de la entrevista.
+        Envía un email de confirmación al emisor notificando la creación de la búsqueda.
         
         Args:
             to_email: Email del emisor
-            interview_name: Nombre de la entrevista creada
+            interview_name: Nombre de la búsqueda creada
             agent_name: Nombre del agente asignado
             agent_id: ID del agente
-            interview_id: ID de la entrevista creada
+            interview_id: ID de la búsqueda creada
             success: Si la creación fue exitosa
             
         Returns:
@@ -1137,26 +1161,26 @@ class GraphEmailMonitor:
             
             # Configurar asunto según el resultado
             if success:
-                subject = f"✅ Entrevista Creada: {interview_name}"
+                subject = f"✅ Búsqueda Creada: {interview_name}"
             else:
-                subject = f"❌ Error Creando Entrevista: {interview_name}"
+                subject = f"❌ Error Creando Búsqueda: {interview_name}"
             
             # Crear cuerpo del email
             if success:
                 body = f"""
 Hola,
 
-Te confirmamos que hemos recibido y procesado tu solicitud de entrevista.
+Te confirmamos que hemos recibido y procesado tu solicitud de búsqueda.
 
-📋 **DETALLES DE LA ENTREVISTA CREADA:**
+📋 **DETALLES DE LA BÚSQUEDA CREADA:**
 • Nombre: {interview_name}
-• ID de Entrevista: {interview_id}
+• ID de Búsqueda: {interview_id}
 • Agente Asignado: {agent_name}
 • ID del Agente: {agent_id}
 • Estado: ✅ Creada exitosamente
 
 🤖 **INFORMACIÓN DEL AGENTE:**
-El agente {agent_name} ha sido asignado automáticamente para manejar esta entrevista basado en los requisitos técnicos especificados.
+El agente {agent_name} ha sido asignado automáticamente para manejar esta búsqueda basado en los requisitos técnicos especificados.
 
 📧 **PRÓXIMOS PASOS:**
 El agente comenzará a procesar las candidaturas y evaluaciones según los criterios establecidos.
@@ -1170,7 +1194,7 @@ Sistema de Evaluación de Candidatos
                 body = f"""
 Hola,
 
-Lamentamos informarte que hubo un problema al procesar tu solicitud de entrevista.
+Lamentamos informarte que hubo un problema al procesar tu solicitud de búsqueda.
 
 📋 **DETALLES DE LA SOLICITUD:**
 • Nombre: {interview_name}
@@ -1197,6 +1221,8 @@ Sistema de Evaluación de Candidatos
             }
             
             evaluation_logger.log_task_progress("Envío Email Confirmación", f"Enviando a {to_email} via {email_api_url}")
+            print(f"📧 Enviando confirmación a {to_email} via {email_api_url}")
+            print(f"📋 Subject: {subject[:50]}...")
             
             try:
                 response = requests.post(
@@ -1205,13 +1231,34 @@ Sistema de Evaluación de Candidatos
                     headers={'Content-Type': 'application/json'},
                     timeout=30
                 )
+                print(f"📊 Response status: {response.status_code}")
+                print(f"📊 Response body: {response.text[:200]}")
                 
                 response.raise_for_status()
                 
                 evaluation_logger.log_task_complete("Envío Email Confirmación", f"Email enviado exitosamente a {to_email}")
+                print(f"✅ Email de confirmación enviado exitosamente a {to_email}")
                 return True
                 
+            except requests.exceptions.ConnectionError as ce:
+                print(f"❌ ERROR DE CONEXIÓN: No se pudo conectar a {email_api_url}")
+                print(f"❌ Detalle: {str(ce)}")
+                evaluation_logger.log_error("Envío Email Confirmación", f"Error de conexión: {str(ce)}")
+                return False
+            except requests.exceptions.Timeout as te:
+                print(f"❌ ERROR DE TIMEOUT: La petición tardó más de 30 segundos")
+                print(f"❌ Detalle: {str(te)}")
+                evaluation_logger.log_error("Envío Email Confirmación", f"Error de timeout: {str(te)}")
+                return False
+            except requests.exceptions.HTTPError as he:
+                print(f"❌ ERROR HTTP: {he.response.status_code if he.response else 'Sin respuesta'}")
+                print(f"❌ Detalle: {str(he)}")
+                if he.response:
+                    print(f"❌ Response body: {he.response.text[:500]}")
+                evaluation_logger.log_error("Envío Email Confirmación", f"Error HTTP: {str(he)}")
+                return False
             except requests.exceptions.RequestException as e:
+                print(f"❌ ERROR DE PETICIÓN: {str(e)}")
                 evaluation_logger.log_error("Envío Email Confirmación", f"Error enviando email: {str(e)}")
                 return False
                 

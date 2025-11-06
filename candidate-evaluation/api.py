@@ -222,18 +222,7 @@ async def trigger_analysis(request: AnalysisRequest = None):
             crew = create_data_processing_crew()
         result = crew.kickoff()
         
-        # Guardar resultados
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"conversation_results_{timestamp}.json"
-        
-        try:
-            result_json = json.loads(str(result))
-            with open(filename, 'w', encoding='utf-8') as f:
-                json.dump(result_json, f, indent=2, ensure_ascii=False)
-        except json.JSONDecodeError:
-            filename = filename.replace('.json', '.txt')
-            with open(filename, 'w', encoding='utf-8') as f:
-                f.write(str(result))
+        # (Resultados ya quedan en memoria; no se escribe archivo en disco)
         
         # Calcular tiempo de ejecución
         end_time = datetime.now()
@@ -265,7 +254,7 @@ async def trigger_analysis(request: AnalysisRequest = None):
             message="Análisis completado exitosamente",
             timestamp=start_time.strftime('%Y-%m-%d %H:%M:%S'),
             execution_time=execution_time,
-            results_file=filename,
+            results_file=None,
             result=result_dict,
             jd_interview_id=jd_interview_id,
             evaluation_id=None,
