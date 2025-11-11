@@ -23,246 +23,58 @@ def create_analysis_task(agent, extraction_task):
     """Tarea de análisis de conversaciones"""
     return Task(
         description="""
-        ⏱️ Antes de comenzar, imprime: START ANALYSIS [YYYY-MM-DD HH:MM:SS]. Al finalizar, imprime: END ANALYSIS [YYYY-MM-DD HH:MM:SS].
+        ⏱️ START ANALYSIS [YYYY-MM-DD HH:MM:SS] | END ANALYSIS [YYYY-MM-DD HH:MM:SS]
 
-        🔍 Realizar un análisis exhaustivo, detallado y cualitativo del campo conversation_data de cada conversación extraída.
+        🔍 Analizar conversation_data de cada conversación. REGLAS: Solo datos de BD. NO inventar. Si falta dato → "N/A".
 
-        REGLAS DE RIGOR DE DATOS (CRÍTICO):
-        - SOLO puedes usar información presente en los datos de entrada (contexto y conversation_data de la BD).
-        - NO inventes nombres, emails, tech_stacks ni datos de candidatos. Si un dato no está, deja "N/A".
-        - Cuando cites fragmentos, cópialos exactamente del conversation_data.
-        - Si faltan campos requeridos, repórtalos explícitamente sin crear contenido.
-        
-        📋 **ENFOQUE PRINCIPAL:** Analizar la FORMA de responder del candidato, no solo el contenido.
-        Proporcionar comentarios detallados y justificaciones fundamentadas para cada evaluación.
+        **ENFOQUE:** Analizar FORMA de responder (estructura, claridad, confianza) + contenido técnico.
 
-        ## 1. 🎯 **ANÁLISIS GENERAL DE LA CONVERSACIÓN**
-        - **Calidad General**: Comentario detallado sobre la impresión general de la conversación
-        - **Fluidez Comunicativa**: Análisis de cómo se expresa el candidato, claridad, coherencia
-        - **Engagement**: Nivel de participación y compromiso mostrado
-        - **Profesionalismo**: Demostración de actitud profesional y madurez
+        **1. ANÁLISIS GENERAL:** Calidad, fluidez comunicativa, engagement, profesionalismo (1-2 líneas cada uno).
 
-        ## 2. 💬 **ANÁLISIS DETALLADO DE PREGUNTAS Y RESPUESTAS**
-        Para cada pregunta importante de la conversación:
-        - **Pregunta**: [Citar la pregunta exacta]
-        - **Respuesta del Candidato**: [Citar la respuesta completa]
-        - **Análisis de la Forma de Responder**:
-          * Tiempo de respuesta (inmediata, reflexiva, evasiva)
-          * Estructura de la respuesta (organizada, desordenada, confusa)
-          * Nivel de detalle (superficial, adecuado, exhaustivo)
-          * Confianza en la respuesta (seguro, inseguro, dubitativo)
-        - **Fortalezas Identificadas**: Qué aspectos positivos se observan
-        - **Áreas de Mejora**: Qué aspectos podrían mejorarse
-        - **Justificación**: Por qué se evalúa de esa manera
+        **2. HABILIDADES BLANDAS (puntaje 0-10 + comentario breve):**
+        - Comunicación, Liderazgo, Trabajo en Equipo, Adaptabilidad, Resolución de Problemas, Gestión del Tiempo, Inteligencia Emocional, Aprendizaje Continuo
+        - Para cada una: puntaje + comentario de 1-2 líneas con ejemplo específico si aplica.
 
-        ## 3. 🤝 **HABILIDADES BLANDAS - ANÁLISIS CUALITATIVO**
-        - **Comunicación**: 
-          * Comentario: Cómo se comunica el candidato, claridad, articulación
-          * Ejemplos específicos de la conversación
-          * Fortalezas y debilidades observadas
-        - **Liderazgo**: 
-          * Comentario: Demostración de iniciativa, toma de decisiones, influencia
-          * Ejemplos específicos de la conversación
-          * Fortalezas y debilidades observadas
-        - **Trabajo en Equipo**: 
-          * Comentario: Colaboración, empatía, resolución de conflictos
-          * Ejemplos específicos de la conversación
-          * Fortalezas y debilidades observadas
-        - **Adaptabilidad**: 
-          * Comentario: Flexibilidad, resiliencia, manejo de cambios
-          * Ejemplos específicos de la conversación
-          * Fortalezas y debilidades observadas
-        - **Resolución de Problemas**: 
-          * Comentario: Pensamiento crítico, creatividad, análisis
-          * Ejemplos específicos de la conversación
-          * Fortalezas y debilidades observadas
-        - **Gestión del Tiempo**: 
-          * Comentario: Organización, priorización, eficiencia
-          * Ejemplos específicos de la conversación
-          * Fortalezas y debilidades observadas
-        - **Inteligencia Emocional**: 
-          * Comentario: Autoconciencia, autorregulación, empatía
-          * Ejemplos específicos de la conversación
-          * Fortalezas y debilidades observadas
-        - **Aprendizaje Continuo**: 
-          * Comentario: Curiosidad, disposición a crecer, apertura al aprendizaje
-          * Ejemplos específicos de la conversación
-          * Fortalezas y debilidades observadas
+        **3. ASPECTOS TÉCNICOS:**
+        - Conocimientos técnicos: nivel + ejemplo específico
+        - Experiencia práctica: evidencia + calidad
+        - Capacidad de explicación: claridad demostrada
 
-        ## 4. 🔧 **ASPECTOS TÉCNICOS - ANÁLISIS DETALLADO**
-        - **Conocimientos Técnicos**: 
-          * Comentario: Nivel de conocimientos demostrados
-          * Ejemplos específicos de respuestas técnicas
-          * Precisión y profundidad de los conceptos
-        - **Experiencia Práctica**: 
-          * Comentario: Evidencia de experiencia real en el campo
-          * Ejemplos específicos de proyectos o situaciones mencionadas
-          * Calidad de las experiencias compartidas
-        - **Capacidad de Explicación**: 
-          * Comentario: Cómo explica conceptos complejos
-          * Ejemplos específicos de explicaciones dadas
-          * Claridad y pedagogía en las explicaciones
+        **4. PREGUNTAS TÉCNICAS (CRÍTICO):**
+        Identificar TODAS las preguntas técnicas del AI sobre la tecnología/stack del puesto.
+        Para cada pregunta técnica encontrada:
+        - Texto exacto (copiar)
+        - ¿Contestada? (SÍ/NO/PARCIALMENTE)
+        - Respuesta exacta del candidato (copiar)
+        - Evaluación breve (1-2 líneas)
+        Resumen: Total [X], Completas [X], Parciales [X], No contestadas [X]. Si hay no contestadas → ALERTA con lista.
 
-        ## 5. 👤 **CARACTERÍSTICAS DE PERSONALIDAD - ANÁLISIS PROFUNDO**
-        - **Confianza y Seguridad**: 
-          * Comentario: Nivel de confianza mostrado
-          * Ejemplos específicos de la conversación
-          * Impacto en la comunicación
-        - **Profesionalismo**: 
-          * Comentario: Demostración de actitud profesional
-          * Ejemplos específicos de la conversación
-          * Madurez y seriedad mostrada
-        - **Actitud Positiva**: 
-          * Comentario: Optimismo y positividad demostrados
-          * Ejemplos específicos de la conversación
-          * Impacto en la dinámica de la conversación
-        - **Motivación y Entusiasmo**: 
-          * Comentario: Nivel de motivación y entusiasmo
-          * Ejemplos específicos de la conversación
-          * Evidencia de pasión por el trabajo
+        **5. PERSONALIDAD:** Confianza, profesionalismo, actitud positiva, motivación (puntaje 0-10 + comentario breve cada uno).
 
-        ## 6. 🔍 **ANÁLISIS OBLIGATORIO DE PREGUNTAS TÉCNICAS**
-        
-        **⚠️ PROCESO CRÍTICO:** Identificar y evaluar EXACTAMENTE las preguntas técnicas específicas en la conversación basadas en el job_description.
-        
-        - **IDENTIFICACIÓN DE PREGUNTAS**: 
-          * Leer cuidadosamente toda la conversación
-          * Identificar EXACTAMENTE las preguntas técnicas específicas realizadas por el AI
-          * Extraer el texto completo de cada pregunta técnica
-          * Verificar que sean preguntas sobre la tecnología/stack específico del puesto (basado en job_description)
-        
-        - **EVALUACIÓN DE RESPUESTAS POR PREGUNTA**:
-          * **Pregunta Técnica 1**: 
-            - Texto exacto: "[COPIAR PREGUNTA EXACTA]"
-            - ¿Fue contestada? [SÍ/NO/PARCIALMENTE]
-            - Respuesta del candidato: "[COPIAR RESPUESTA EXACTA]"
-            - Evaluación: [ANÁLISIS DETALLADO DE LA RESPUESTA]
-          * **Pregunta Técnica 2**: 
-            - Texto exacto: "[COPIAR PREGUNTA EXACTA]"
-            - ¿Fue contestada? [SÍ/NO/PARCIALMENTE]
-            - Respuesta del candidato: "[COPIAR RESPUESTA EXACTA]"
-            - Evaluación: [ANÁLISIS DETALLADO DE LA RESPUESTA]
-          * **Pregunta Técnica 3**: 
-            - Texto exacto: "[COPIAR PREGUNTA EXACTA]"
-            - ¿Fue contestada? [SÍ/NO/PARCIALMENTE]
-            - Respuesta del candidato: "[COPIAR RESPUESTA EXACTA]"
-            - Evaluación: [ANÁLISIS DETALLADO DE LA RESPUESTA]
-          * **Pregunta Técnica 4**: 
-            - Texto exacto: "[COPIAR PREGUNTA EXACTA]"
-            - ¿Fue contestada? [SÍ/NO/PARCIALMENTE]
-            - Respuesta del candidato: "[COPIAR RESPUESTA EXACTA]"
-            - Evaluación: [ANÁLISIS DETALLADO DE LA RESPUESTA]
-          * **Pregunta Técnica 5**: 
-            - Texto exacto: "[COPIAR PREGUNTA EXACTA]"
-            - ¿Fue contestada? [SÍ/NO/PARCIALMENTE]
-            - Respuesta del candidato: "[COPIAR RESPUESTA EXACTA]"
-            - Evaluación: [ANÁLISIS DETALLADO DE LA RESPUESTA]
-        
-        - **RESUMEN DE COMPLETITUD**:
-          * Total de preguntas técnicas identificadas: [X/Y]
-          * Preguntas completamente contestadas: [X/Y]
-          * Preguntas parcialmente contestadas: [X/Y]
-          * Preguntas NO contestadas: [X/Y]
-          * **ALERTA CRÍTICA**: Si hay preguntas sin contestar, indicar claramente cuáles son
-        
-        - **EVALUACIÓN TÉCNICA GLOBAL**:
-          * Nivel de conocimiento técnico en la tecnología específica demostrado
-          * Precisión en conceptos específicos de la tecnología/stack
-          * Capacidad de explicar conceptos complejos
-          * Ejemplos prácticos y código proporcionado
-          * Coherencia entre respuestas técnicas
+        **6. CONVERSACIÓN:** Sentimiento predominante, temas clave (lista), engagement (Bajo/Medio/Alto), calidad de respuestas (breve).
 
-        ## 7. 🧠 **ANÁLISIS CONVERSACIONAL DETALLADO**
-        - **Sentimientos Predominantes**: 
-          * Comentario: Qué emociones predominan en la conversación
-          * Ejemplos específicos de expresiones emocionales
-          * Impacto en la comunicación
-        - **Temas Principales**: 
-          * Comentario: Qué temas se discuten más
-          * Profundidad de cada tema tratado
-          * Relevancia para el puesto
-        - **Momentos Destacados**: 
-          * Comentario: Momentos más positivos y negativos
-          * Ejemplos específicos de cada momento
-          * Impacto en la evaluación general
-        - **Patrones de Respuesta**: 
-          * Comentario: Patrones consistentes en las respuestas
-          * Ejemplos específicos de patrones observados
-          * Implicaciones para el rol
+        **7. EVALUACIÓN FINAL:**
+        - Resumen ejecutivo (2-3 líneas)
+        - Fortalezas principales (lista 3-5)
+        - Áreas de mejora (lista 2-3)
+        - Recomendación: Recomendado/Condicional/No Recomendado + justificación (2-3 líneas)
 
-        ## 8. 📊 **EVALUACIÓN INTEGRAL**
-        - **Resumen Ejecutivo**: 
-          * Comentario general sobre el candidato
-          * Impresión general de la conversación
-          * Nivel de compatibilidad con el puesto
-        - **Fortalezas Principales**: 
-          * Lista detallada de fortalezas identificadas
-          * Ejemplos específicos de cada fortaleza
-          * Impacto en el desempeño potencial
-        - **Áreas de Mejora**: 
-          * Lista detallada de áreas de mejora
-          * Ejemplos específicos de cada área
-          * Recomendaciones para el desarrollo
-        - **Recomendación Final**: 
-          * Recomendación de contratación (Recomendado/Condicional/No Recomendado)
-          * Justificación detallada de la recomendación
-          * Factores clave que influyen en la decisión
-
-        ## FORMATO DE SALIDA JSON:
-        ```json
+        **FORMATO JSON (OBLIGATORIO):**
         {
           "conversation_id": "string",
-          "candidate_name": "string",
-          "overall_assessment": {
-            "general_score": 0-10,
-            "recommendation": "Recomendado/Condicional/No Recomendado",
-            "confidence_level": "Alta/Media/Baja"
-          },
-          "soft_skills": {
-            "communication": 0-10,
-            "leadership": 0-10,
-            "teamwork": 0-10,
-            "adaptability": 0-10,
-            "problem_solving": 0-10,
-            "time_management": 0-10,
-            "emotional_intelligence": 0-10,
-            "continuous_learning": 0-10
-          },
-          "technical_assessment": {
-            "technical_score": 0-10,
-            "knowledge_depth": "Básico/Intermedio/Avanzado/Experto",
-            "practical_experience": "Limitada/Moderada/Amplia/Extensa"
-          },
-          "personality_traits": {
-            "confidence": 0-10,
-            "professionalism": 0-10,
-            "positive_attitude": 0-10,
-            "motivation": 0-10
-          },
-          "conversation_analysis": {
-            "predominant_sentiment": "string",
-            "key_topics": ["topic1", "topic2"],
-            "engagement_level": "Bajo/Medio/Alto",
-            "response_quality": "string"
-          },
-          "detailed_insights": {
-            "strengths": ["strength1", "strength2"],
-            "weaknesses": ["weakness1", "weakness2"],
-            "standout_moments": ["moment1", "moment2"],
-            "concerns": ["concern1", "concern2"]
-          },
-          "final_recommendation": {
-            "summary": "string",
-            "hiring_decision": "string",
-            "justification": "string",
-            "next_steps": "string"
-          }
+          "candidate_name": "string (de BD, no inventar)",
+          "overall_assessment": {"general_score": 0-10, "recommendation": "Recomendado/Condicional/No Recomendado", "confidence_level": "Alta/Media/Baja"},
+          "soft_skills": {"communication": 0-10, "leadership": 0-10, "teamwork": 0-10, "adaptability": 0-10, "problem_solving": 0-10, "time_management": 0-10, "emotional_intelligence": 0-10, "continuous_learning": 0-10},
+          "technical_assessment": {"technical_score": 0-10, "knowledge_depth": "Básico/Intermedio/Avanzado/Experto", "practical_experience": "Limitada/Moderada/Amplia/Extensa", "technical_questions": [{"question": "texto exacto", "answered": "SÍ/NO/PARCIALMENTE", "answer": "respuesta exacta", "evaluation": "breve"}]},
+          "personality_traits": {"confidence": 0-10, "professionalism": 0-10, "positive_attitude": 0-10, "motivation": 0-10},
+          "conversation_analysis": {"predominant_sentiment": "string", "key_topics": ["topic1"], "engagement_level": "Bajo/Medio/Alto", "response_quality": "string"},
+          "detailed_insights": {"strengths": ["s1", "s2"], "weaknesses": ["w1"], "standout_moments": ["m1"], "concerns": ["c1"]},
+          "final_recommendation": {"summary": "string", "hiring_decision": "string", "justification": "string", "next_steps": "string"}
         }
-        ```
-        
-        Ser exhaustivo pero conciso. Basar todas las evaluaciones en evidencia específica de la conversación.
+
+        **OPTIMIZACIÓN:** Comentarios breves (1-2 líneas). Ejemplos solo si son relevantes. Evitar repeticiones.
         """,
-        expected_output="Análisis exhaustivo y cualitativo de cada conversación con comentarios detallados, justificaciones fundamentadas y evaluaciones específicas en formato JSON",
+        expected_output="JSON con análisis conciso de cada conversación: puntajes 0-10, comentarios breves (1-2 líneas), preguntas técnicas identificadas, y recomendación final",
         agent=agent,
         context=[extraction_task]
     )
@@ -473,20 +285,23 @@ def create_email_sending_task(agent, processing_task):
     """Tarea de envío de email con resultados"""
     return Task(
         description="""
-        ⏱️ Antes de comenzar, imprime: START EMAIL_SENDING [YYYY-MM-DD HH:MM:SS]. Al finalizar, imprime: END EMAIL_SENDING [YYYY-MM-DD HH:MM:SS].
+        ⏱️ **OBLIGATORIO:** Antes de comenzar, imprime: START EMAIL_SENDING [YYYY-MM-DD HH:MM:SS]. Al finalizar, imprime: END EMAIL_SENDING [YYYY-MM-DD HH:MM:SS].
 
-        🚀 Generar y enviar OBLIGATORIAMENTE un reporte final de evaluación de candidatos siguiendo EXACTAMENTE el formato especificado.
+        🚀 **TAREA CRÍTICA:** Generar y enviar OBLIGATORIAMENTE un reporte final de evaluación de candidatos siguiendo EXACTAMENTE el formato especificado.
+        
+        ⚠️ **IMPORTANTE:** Esta tarea DEBE ejecutarse SIEMPRE, incluso si las tareas anteriores tuvieron problemas. Si no hay datos completos del processing_task, usar los datos disponibles de extraction_task o analysis_task.
 
         ⚠️ **IMPORTANTE:** Este reporte es OBLIGATORIO y debe generarse SIEMPRE. Enviar SOLAMENTE UN EMAIL.
 
         🎯 **INSTRUCCIONES CRÍTICAS:**
         1. 📅 **PRIMERO:** Usar la herramienta get_current_date() para obtener la fecha actual en formato DD/MM/YYYY
-        2. 📊 **OBTENER DATOS:** Revisar el resultado de la tarea de procesamiento (processing_task) para obtener todos los datos de candidatos y evaluaciones
-        3. 📧 **ASUNTO DEL EMAIL:** 
+        2. 📊 **OBTENER DATOS:** Revisar el resultado de la tarea de procesamiento (processing_task) o extraction_task para obtener todos los datos de candidatos y evaluaciones
+        3. 🔍 **EXTRAER JD_INTERVIEW_ID:** Identificar el jd_interview_id de los datos disponibles (extraction_task o processing_task)
+        4. 📧 **OBTENER EMAIL DEL CLIENTE:** Usar get_jd_interviews_data(jd_interview_id) para obtener client_id, luego get_client_email(client_id) para obtener el email del cliente
+        5. 📧 **ASUNTO DEL EMAIL:** 
            - Si es análisis completo: "📊 Reporte de Evaluación de Candidatos - [FECHA]"
            - Si es análisis filtrado: "📊 Reporte de Evaluación - [JD_INTERVIEW_NAME] (ID: [JD_INTERVIEW_ID]) - [FECHA]"
-        4. 🔍 **DETECTAR TIPO DE ANÁLISIS:** Revisar los datos de entrada para identificar si incluyen información de jd_interview (jd_interview_id, jd_interview_name, jd_interview_agent_id)
-        5. 📊 Generar el reporte completo con todos los candidatos analizados
+        6. 📊 Generar el reporte completo con todos los candidatos analizados
         4. 📝 **ANÁLISIS CUALITATIVO:** En las secciones de habilidades y evaluación técnica, proporcionar análisis textuales detallados con comentarios sobre la forma de responder, ejemplos específicos y justificaciones fundamentadas
         5. 📝 **ANÁLISIS DE MATCHEO:** Debe ser un análisis textual breve de 1-2 líneas, sin puntajes numéricos, enfocado en la compatibilidad general del candidato con el puesto
         6. 🎯 **ENFOQUE PRINCIPAL:** Analizar la FORMA de responder del candidato, no solo el contenido, con comentarios detallados y justificaciones
@@ -602,7 +417,7 @@ def create_email_sending_task(agent, processing_task):
         🎯 Fortalezas Clave: [FORTALEZAS_PRINCIPALES]
         📝 Análisis: [ANÁLISIS_BREVE_MATCHEO_5]
 
-        📋 **NOTA:** Si hay menos de 5 candidatos, mostrar solo los disponibles ordenados por compatibilidad.
+        📋 **NOTA:** Mostrar siempre 5 candidatos, si hay menos, mostrar los disponibles ordenados por compatibilidad.
 
         ════════════════════════════════════════════════════════════════════════════════
 
@@ -620,15 +435,16 @@ def create_email_sending_task(agent, processing_task):
         11. 🔄 Todos los campos entre corchetes deben ser reemplazados con datos reales
 
         ⚠️ **RESTRICCIÓN CRÍTICA:**
-        - Debes llamar a send_evaluation_email(subject, body) EXACTAMENTE UNA VEZ.
+        - Debes llamar a send_evaluation_email(subject, body, to_email=email_del_cliente) EXACTAMENTE UNA VEZ.
+        - El email_del_cliente DEBE obtenerse usando get_jd_interviews_data() y get_client_email().
         - El body DEBE construirse SOLO con datos provenientes del processing_task (derivados de la BD).
         - NO inventes nombres ni datos. Si faltan, muestra "N/A".
         
         🔧 **USO DE HERRAMIENTAS:**
-        1. Usar get_current_date() para obtener la fecha actual
-        2. Usar send_evaluation_email(subject, body) para enviar el email
-        3. El subject debe seguir el formato especificado arriba
-        4. El body debe contener todo el reporte formateado según el formato exacto
+        - get_current_date(): Obtener fecha actual
+        - get_jd_interviews_data(jd_interview_id): Obtener datos del jd_interview (incluye client_id)
+        - get_client_email(client_id): Obtener email del cliente desde la tabla clients
+        - send_evaluation_email(subject, body, to_email): Enviar email (el to_email debe venir de get_client_email())
         """,
         expected_output="Confirmación del envío y copia del reporte completo formateado según el formato exacto especificado",
         agent=agent,
@@ -819,10 +635,11 @@ def create_filtered_extraction_task(agent, jd_interview_id: str):
 
         Extraer conversaciones filtradas por jd_interview_id: {jd_interview_id}
         
+        ⚠️ **IMPORTANTE:** Llamar a get_conversations_by_jd_interview EXACTAMENTE UNA VEZ. NO llamar múltiples veces.
+        
         Proceso:
-        1. Obtener jd_interview por ID: {jd_interview_id}
-        2. Buscar meets que tengan jd_interviews_id = {jd_interview_id}
-        3. Obtener conversaciones de esos meets específicos
+        1. Llamar UNA VEZ a get_conversations_by_jd_interview con jd_interview_id: {jd_interview_id}
+        2. Usar los datos obtenidos directamente. NO volver a llamar la herramienta.
         
         Incluir información relacionada de candidatos y meets usando los campos:
         - candidate_id para enlazar con tabla candidates
@@ -832,9 +649,9 @@ def create_filtered_extraction_task(agent, jd_interview_id: str):
         Asegurar que cada registro incluya:
         - meet_id, candidate_id, conversation_data (campos específicos de conversations)
         - Datos completos del candidato (id, name, email, phone, cv_url, tech_stack)
-        - Información del jd_interview (nombre, agent_id, email_source)
+        - Información del jd_interview (id, nombre, agent_id)
         """,
-        expected_output=f"Lista JSON de conversaciones filtradas por jd_interview_id: {jd_interview_id} con toda la información relacionada. Si no hay conversaciones, incluir mensaje informativo: 'No se han presentado candidatos para esta entrevista'. IMPORTANTE: Incluir siempre la información del jd_interview (id, name, agent_id, email_source) para usar en el título del reporte.",
+        expected_output=f"Lista JSON de conversaciones filtradas por jd_interview_id: {jd_interview_id} con toda la información relacionada. Si no hay conversaciones, incluir mensaje informativo: 'No se han presentado candidatos para esta entrevista'. IMPORTANTE: Incluir siempre la información del jd_interview (id, name, agent_id) para usar en el título del reporte.",
         agent=agent
     )
 
@@ -877,7 +694,7 @@ def create_matching_task(agent):
            - Para cada candidato con matches, incluir:
              * Datos completos del candidato (id, name, email, phone, cv_url, tech_stack)
              * Lista de entrevistas que coinciden con sus datos
-             * Para cada entrevista: registro completo de jd_interviews (id, interview_name, agent_id, job_description, email_source, created_at) + score de compatibilidad + análisis del match
+            * Para cada entrevista: registro completo de jd_interviews (id, interview_name, agent_id, job_description, created_at) + score de compatibilidad + análisis del match
         
         6. 📝 **Formato de Salida SIMPLIFICADO:**
            ```json
@@ -899,7 +716,6 @@ def create_matching_task(agent):
                        "interview_name": "Desarrollador React Senior",
                        "agent_id": "agent_123",
                        "job_description": "Buscamos desarrollador con React, JavaScript...",
-                       "email_source": "recruiting@company.com",
                        "created_at": "2025-01-18T10:30:00Z"
                      },
                      "compatibility_score": 85,
@@ -936,7 +752,7 @@ def create_single_meet_extraction_task(agent, meet_id: str):
         - Información completa del meet (id, jd_interviews_id, fechas)
         - Conversación asociada al meet (conversation_data)
         - Datos completos del candidato (id, name, email, phone, cv_url, tech_stack)
-        - Información del JD interview asociado (id, interview_name, agent_id, job_description, email_source)
+        - Información del JD interview asociado (id, interview_name, agent_id, job_description)
         
         Usar get_meet_evaluation_data(meet_id="{meet_id}") para obtener todos los datos.
         """,

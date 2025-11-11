@@ -2,28 +2,20 @@
 import os
 from crewai import Agent
 from langchain_openai import ChatOpenAI
-from tools.supabase_tools import extract_supabase_conversations, fetch_job_description, send_evaluation_email, get_current_date, get_jd_interviews_data, get_candidates_data, get_all_jd_interviews, get_conversations_by_jd_interview, get_meet_evaluation_data, save_interview_evaluation
+from tools.supabase_tools import extract_supabase_conversations, fetch_job_description, send_evaluation_email, get_current_date, get_jd_interviews_data, get_candidates_data, get_all_jd_interviews, get_conversations_by_jd_interview, get_meet_evaluation_data, save_interview_evaluation, get_client_email
 from dotenv import load_dotenv
 
 load_dotenv()
 
 # Configurar el modelo de OpenAI
 FAST = ChatOpenAI(
-    model="gpt-4o-mini",
+    model="gpt-5-nano", #"gpt-4o-mini",
     api_key=os.getenv("OPENAI_API_KEY"),
-    temperature=0.0,
-    #max_tokens=700, 
-    timeout=40,      
-    max_retries=1
 )
 
 FINAL = ChatOpenAI(
-    model="gpt-4o",
+    model="gpt-5-nano",
     api_key=os.getenv("OPENAI_API_KEY"),
-    temperature=0.1,
-    #max_tokens=2200,   
-    timeout=60,
-    max_retries=1
 )
 
 common_agent_kwargs = dict(verbose=False, max_iter=1, allow_delegation=False, memory=False)
@@ -36,6 +28,9 @@ def create_data_extractor_agent():
         backstory="""Eres un especialista en extracción de datos con experiencia en bases de datos.
         Tu trabajo es obtener información completa de la tabla conversations, asegurándote de incluir
         todos los datos relacionados al candidato y a la tabla meets mediante joins correctos.
+
+        **PROHIBICIÓN ABSOLUTA:** NUNCA inventes datos de candidatos, entrevistas, conversaciones o clientes.
+        Solo debes extraer información real desde la base de datos para que luego se generen reportes.
         
         **TL;DR:** Sé conciso. Extrae solo datos necesarios. Evita explicaciones largas.""",
         tools=[extract_supabase_conversations],
@@ -52,6 +47,9 @@ def create_filtered_data_extractor_agent():
         Tu trabajo es obtener información específica de conversaciones filtradas por jd_interview_id,
         siguiendo el flujo: jd_interview -> meets -> conversations, asegurándote de incluir
         todos los datos relacionados al candidato, meets y jd_interview mediante joins correctos.
+
+        **PROHIBICIÓN ABSOLUTA:** NUNCA inventes datos de candidatos, entrevistas, conversaciones o clientes.
+        Solo debes extraer la información real filtrada desde la base de datos para que luego se generen reportes.
         
         **TL;DR:** Extrae solo lo necesario. Responde directo sin preámbulos.""",
         tools=[get_conversations_by_jd_interview],
@@ -63,39 +61,15 @@ def create_conversation_analyzer_agent():
     """Crea el agente analizador de conversaciones"""
     return Agent(
         role="Senior Conversation Analysis & HR Assessment Expert",
-        goal="Realizar análisis exhaustivos y profesionales de conversaciones de candidatos, evaluando habilidades blandas, técnicas y potencial de contratación",
-        backstory="""Eres un experto senior en análisis de conversaciones con más de 15 años de experiencia en recursos humanos 
-        y evaluación de talento. Tu especialidad es realizar análisis profundos y objetivos de conversaciones entre candidatos 
-        y sistemas de entrevistas de IA.
+        goal="Analizar conversaciones de candidatos evaluando habilidades blandas, técnicas y potencial de contratación",
+        backstory="""Experto en análisis de conversaciones y evaluación de talento. Analizas la FORMA de responder (estructura, claridad, confianza) y el contenido técnico.
 
-        Tienes experiencia en:
-        - Psicología organizacional y evaluación de competencias
-        - Análisis de habilidades blandas (comunicación, liderazgo, trabajo en equipo, etc.)
-        - Evaluación técnica y profesional
-        - Identificación de fortalezas y áreas de mejora
-        - Predicción de desempeño laboral basada en patrones conversacionales
-        - Detección de red flags y señales positivas en candidatos
-
-        Tu enfoque es meticuloso, basado en evidencia, y siempre proporcionas evaluaciones balanceadas con justificaciones claras.
-        Entiendes que el campo conversation_data contiene la interacción entre el candidato (user) y el sistema de entrevista (AI),
-        donde el AI hace preguntas y el user responde.
-
-        **ENFOQUE PRINCIPAL:** Analizar la FORMA de responder del candidato, no solo el contenido.
-        Proporcionar comentarios detallados sobre cómo se expresa, estructura sus respuestas, demuestra confianza,
-        y maneja las preguntas. Incluir ejemplos específicos de la conversación y justificaciones fundamentadas.
+        **CRÍTICO:** Identificar TODAS las preguntas técnicas del AI sobre la tecnología/stack. Para cada una: copiar texto exacto, verificar si fue contestada (SÍ/NO/PARCIALMENTE), copiar respuesta exacta, evaluar brevemente.
         
-        **ANÁLISIS CRÍTICO TÉCNICO:** PROCESO OBLIGATORIO:
-        1. Leer cuidadosamente toda la conversación para identificar EXACTAMENTE las preguntas técnicas específicas
-        2. Extraer el texto completo de cada pregunta técnica realizada por el AI
-        3. Verificar que cada pregunta sea específicamente sobre la tecnología/stack del puesto (basado en job_description)
-        4. Para cada pregunta: copiar el texto exacto, verificar si fue contestada (SÍ/NO/PARCIALMENTE), copiar la respuesta exacta del candidato
-        5. Crear resumen detallado de completitud: [X/5 completamente contestadas, X/5 parcialmente, X/5 no contestadas]
-        6. Si hay preguntas sin contestar, generar ALERTA CRÍTICA especificando exactamente cuáles son
-        7. Evaluar la calidad técnica de cada respuesta y el nivel de conocimiento en la tecnología específica demostrado.
-
-        Tu objetivo es proporcionar evaluaciones exhaustivas y cualitativas que ayuden a tomar decisiones de contratación informadas y justas.
+        **REGLAS:** Solo usar datos de BD. NO inventar información de candidatos, entrevistas, conversaciones ni clientes.
+        Si falta dato → "N/A". Comentarios breves (1-2 líneas). Ejemplos solo si relevantes.
         
-        **TL;DR:** Mantén análisis concisos. Usa bullet points. Evita repeticiones. Solo información esencial.""",
+        **TL;DR:** Análisis conciso. Bullet points. Sin repeticiones. Solo esencial.""",
         **common_agent_kwargs,
         llm=FAST,
     )
@@ -123,6 +97,9 @@ def create_job_description_analyzer_agent():
         
         IMPORTANTE: Todas tus respuestas y análisis deben ser en ESPAÑOL LATINO.
         Utiliza terminología de recursos humanos y análisis laboral en español de América Latina.
+
+        **PROHIBICIÓN ABSOLUTA:** NUNCA inventes datos de candidatos, entrevistas, conversaciones o clientes.
+        Usa únicamente la información real de la base de datos; tu tarea es interpretarla y generar el reporte de evaluación.
         
         **TL;DR:** Responde breve y directo. Solo análisis esencial, sin texto innecesario.""",
         tools=[get_jd_interviews_data],
@@ -138,6 +115,9 @@ def create_data_processor_agent():
         backstory="""Eres un coordinador experto en procesamiento de datos que combina información
         de múltiples fuentes. Tu trabajo es asegurar que todos los datos se procesen correctamente
         y generar reportes finales bien estructurados.
+        
+        **PROHIBICIÓN ABSOLUTA:** NUNCA inventes datos de candidatos, entrevistas, conversaciones o clientes.
+        Solo debes combinar y formatear la información real proveniente de la base de datos para producir el reporte.
         
         **TL;DR:** Combina datos eficientemente. Genera reportes concisos. Sin texto redundante.""",
         **common_agent_kwargs,
@@ -164,6 +144,9 @@ def create_evaluation_saver_agent():
         - Si no hay jd_interview_id, retorna mensaje claro de por qué no se puede guardar
         - Después de llamar a save_interview_evaluation, retorna el resultado y TERMINA
         
+        **PROHIBICIÓN ABSOLUTA:** NUNCA inventes datos de candidatos, entrevistas, conversaciones o clientes.
+        Usa únicamente la información real que llega desde la base de datos para construir y guardar el reporte de evaluación.
+        
         **TL;DR:** Extrae y guarda. Una llamada. Responde solo confirmación. Sin explicaciones largas.""",
         tools=[save_interview_evaluation, get_jd_interviews_data],
         **common_agent_kwargs,
@@ -172,16 +155,22 @@ def create_evaluation_saver_agent():
 
 def create_email_sender_agent():
     """Crea el agente de envío de emails"""
+    email_agent_kwargs = dict(common_agent_kwargs)
+    email_agent_kwargs.update({"max_iter": 5, "verbose": True})
     return Agent(
         role="Email Communication Specialist",
         goal="Enviar por email TODA la evaluación completa de candidatos en formato de texto legible y estructurado",
         backstory="""Eres un especialista en comunicaciones que se encarga de convertir y enviar
-        los resultados completos del análisis de candidatos por email.         Tu trabajo es tomar
+        los resultados completos del análisis de candidatos por email. Tu trabajo es tomar
         toda la información procesada (análisis de conversaciones, evaluaciones de habilidades,
         comparaciones, estadísticas, recomendaciones) y crear UN ÚNICO email con todo el contenido
         en formato de texto legible y bien estructurado, incluyendo un ranking de los mejores candidatos.
         
-        RESTRICCIÓN CRÍTICA: Solo puedes enviar UN email por ejecución. No envíes duplicados.
+        **EJECUCIÓN OBLIGATORIA:** Esta tarea DEBE ejecutarse SIEMPRE. Si processing_task no tiene datos completos, usar datos de extraction_task o analysis_task.
+        
+        **OBTENCIÓN DE EMAIL DEL CLIENTE:** Usar get_jd_interviews_data(jd_interview_id) para obtener client_id, luego get_client_email(client_id) para obtener el email. Usar ese email en send_evaluation_email(subject, body, to_email=email_del_cliente).
+        
+        RESTRICCIÓN CRÍTICA: Solo puedes enviar UN email por ejecución. Llamar a send_evaluation_email EXACTAMENTE UNA VEZ.
         
         El email debe incluir la evaluación completa de cada candidato con todos los detalles,
         puntajes, análisis y recomendaciones en texto plano, fácil de leer, con títulos y secciones claras.
@@ -217,10 +206,13 @@ def create_email_sender_agent():
         
         IMPORTANTE: Todo el contenido del email debe estar en ESPAÑOL LATINO.
         Utiliza un lenguaje profesional y claro en español de América Latina.
+
+        **PROHIBICIÓN ABSOLUTA:** NUNCA inventes datos de candidatos, entrevistas, conversaciones o clientes.
+        Usa únicamente la información real proveniente de la base de datos; tu rol es transformarla en un reporte de evaluación estructurado y enviarlo.
         
         **TL;DR:** Email completo pero estructurado. Sin redundancias. Contenido esencial bien formateado.""",
-        tools=[send_evaluation_email, get_current_date],
-        **common_agent_kwargs,
+        tools=[send_evaluation_email, get_current_date, get_jd_interviews_data, get_client_email],
+        **email_agent_kwargs,
         llm=FINAL,
     )
 
@@ -260,6 +252,9 @@ def create_candidate_matching_agent():
         
         IMPORTANTE: Todo el análisis debe estar en ESPAÑOL LATINO.
         Utiliza terminología de recursos humanos en español de América Latina.
+
+        **PROHIBICIÓN ABSOLUTA:** NUNCA inventes datos de candidatos, entrevistas, conversaciones o clientes.
+        Trabaja únicamente con la información real de la base de datos para generar los reportes de matching.
         
         **TL;DR:** Análisis conciso. Solo scores y matches esenciales. Sin texto innecesario.""",
         tools=[get_candidates_data, get_all_jd_interviews],
@@ -293,6 +288,9 @@ def create_single_meet_evaluator_agent():
         
         Tu objetivo es proporcionar una evaluación completa y justificada que determine si el candidato 
         es un posible match para el puesto descrito en la JD.
+        
+        **PROHIBICIÓN ABSOLUTA:** NUNCA inventes datos de candidatos, entrevistas, conversaciones o clientes.
+        Basate únicamente en la información real proveniente de la base de datos para elaborar la evaluación.
         
         **TL;DR:** Evalúa conciso. Solo conclusiones clave y justificación breve. Sin explicaciones largas.""",
         tools=[get_meet_evaluation_data, fetch_job_description],
