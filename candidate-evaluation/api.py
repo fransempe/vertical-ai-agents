@@ -21,6 +21,10 @@ from single_meet_crew import create_single_meet_evaluation_crew
 from utils.logger import evaluation_logger
 from supabase import create_client
 from tracking import TokenTracker
+from tools.token_estimator import estimate_cost, estimate_task_tokens
+from tools.supabase_tools import get_meet_evaluation_data
+from agents import create_single_meet_evaluator_agent
+from tasks import create_single_meet_extraction_task, create_single_meet_evaluation_task
 
 
 GRAPH_TENANT_ID = os.getenv("GRAPH_TENANT_ID", "")
@@ -967,6 +971,117 @@ async def handle_outlook_notifications(payload: dict):
     except Exception as e:
         print(f"❌ Error procesando notificaciones: {str(e)}")
         evaluation_logger.log_error("Handle Notifications", f"Error procesando notificaciones: {str(e)}")
+
+class TokenEstimationResponse(BaseModel):
+    status: str
+    message: str
+    meet_id: str
+    model: str
+    estimated_tokens: int
+    estimated_cost_usd: float
+    timestamp: str
+
+@app.post("/estimate-meet-tokens", response_model=TokenEstimationResponse)
+async def estimate_meet_tokens(request: SingleMeetRequest):
+    """
+    Endpoint que estima el consumo de tokens antes de ejecutar el crew de evaluación de un meet
+    
+    Args:
+        request: Objeto con meet_id del meet a evaluar
+        
+    Returns:
+        Estimación de tokens y costo aproximado
+    """
+    try:
+        meet_id = request.meet_id
+        evaluation_logger.log_task_start("API", f"Estimando tokens para meet: {meet_id}")
+        
+        # Obtener datos del meet para estimar tokens
+        func_to_call = None
+        if hasattr(get_meet_evaluation_data, '__wrapped__'):
+            func_to_call = get_meet_evaluation_data.__wrapped__
+        elif hasattr(get_meet_evaluation_data, 'func'):
+            func_to_call = get_meet_evaluation_data.func
+        elif hasattr(get_meet_evaluation_data, '_func'):
+            func_to_call = get_meet_evaluation_data._func
+        elif callable(get_meet_evaluation_data) and not hasattr(get_meet_evaluation_data, 'name'):
+            func_to_call = get_meet_evaluation_data
+        
+        if not func_to_call:
+            raise HTTPException(status_code=500, detail="No se pudo acceder a la función get_meet_evaluation_data")
+        
+        meet_data_json = func_to_call(meet_id)
+        meet_data = json.loads(meet_data_json) if isinstance(meet_data_json, str) else meet_data_json
+        
+        # Obtener información del agente y tareas
+        evaluator_agent = create_single_meet_evaluator_agent()
+        extraction_task = create_single_meet_extraction_task(evaluator_agent, meet_id)
+        evaluation_task = create_single_meet_evaluation_task(evaluator_agent, extraction_task)
+        
+        # Construir mensajes para estimación (simulando lo que se enviaría al LLM)
+        # System message con backstory del agente
+        system_message = {
+            "role": "system",
+            "content": f"""Eres un {evaluator_agent.role}.
+            
+{evaluator_agent.backstory}
+
+Tu objetivo: {evaluator_agent.goal}"""
+        }
+        
+        # User message con descripción de la tarea + contexto (datos del meet)
+        task_description = evaluation_task.description
+        context_data = json.dumps(meet_data, indent=2, ensure_ascii=False) if meet_data else ""
+        
+        user_message_content = f"""{task_description}
+
+## CONTEXTO - DATOS DEL MEET:
+{context_data}
+
+## SALIDA ESPERADA:
+{evaluation_task.expected_output}"""
+        
+        user_message = {
+            "role": "user",
+            "content": user_message_content
+        }
+        
+        # Construir lista de mensajes
+        messages = [system_message, user_message]
+        
+        # Calcular estimación de tokens
+        model = "gpt-4o-mini"  # Modelo usado en agents.py
+        estimated_tokens = estimate_task_tokens(messages, model)
+        estimated_cost = estimate_cost(estimated_tokens, model)
+        
+        # Mostrar estimación
+        print(f"\n{'='*60}")
+        print(f"📊 ESTIMACIÓN DE TOKENS PARA MEET: {meet_id}")
+        print(f"{'='*60}")
+        print(f"Modelo: {model}")
+        print(f"Tokens estimados: {estimated_tokens:,}")
+        print(f"Costo estimado: ${estimated_cost:.4f} USD")
+        print(f"{'='*60}\n")
+        
+        evaluation_logger.log_task_complete("API", f"Estimación completada: {estimated_tokens:,} tokens | ${estimated_cost:.4f} USD")
+        
+        return TokenEstimationResponse(
+            status="success",
+            message=f"Estimación de tokens calculada exitosamente",
+            meet_id=meet_id,
+            model=model,
+            estimated_tokens=estimated_tokens,
+            estimated_cost_usd=estimated_cost,
+            timestamp=datetime.now().isoformat()
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        error_msg = f"Error al estimar tokens: {str(e)}"
+        print(f"❌ {error_msg}")
+        evaluation_logger.log_error("API", error_msg)
+        raise HTTPException(status_code=500, detail=error_msg)
 
 if __name__ == "__main__":
     import uvicorn
