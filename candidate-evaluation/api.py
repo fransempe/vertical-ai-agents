@@ -20,6 +20,7 @@ from filtered_crew import create_filtered_data_processing_crew
 from single_meet_crew import create_single_meet_evaluation_crew
 from utils.logger import evaluation_logger
 from supabase import create_client
+from tracking import TokenTracker
 
 
 GRAPH_TENANT_ID = os.getenv("GRAPH_TENANT_ID", "")
@@ -615,15 +616,36 @@ async def evaluate_single_meet(request: SingleMeetRequest):
     Args:
         request: Objeto con meet_id del meet a evaluar
     """
+    tracker = None
     try:
         meet_id = request.meet_id
         evaluation_logger.log_task_start("API", f"Iniciando evaluación de meet: {meet_id}")
+        
+        # Inicializar tracker de tokens
+        tracker = TokenTracker(log_dir="logs/token_tracking")
+        run_id = tracker.start_run(
+            crew_name="SingleMeetEvaluationCrew",
+            meta={"meet_id": meet_id}
+        )
+        print(f"▶ RunID: {run_id}")
         
         start_time = datetime.now()
         
         # Crear y ejecutar crew de evaluación individual        
         crew = create_single_meet_evaluation_crew(meet_id)
         result = crew.kickoff()
+        
+        # Registrar uso de tokens del crew
+        tracker.add_crew_result(
+            result=result,
+            step_name="crew.kickoff",
+            agent=None,
+            task=None,
+            extra={
+                "usage_metrics": getattr(crew, "usage_metrics", None),
+                "result_meta": getattr(result, "raw", None) and {"has_raw": True}
+            }
+        )
         
         end_time = datetime.now()
         execution_time = end_time - start_time
@@ -850,6 +872,14 @@ Sistema de Evaluación de Candidatos
                 evaluation_logger.log_error("Envío Email Match", f"Error enviando email de match: {str(email_error)}")
                 # No fallar la respuesta por error en el email
         
+        # Finalizar tracking de tokens
+        if tracker:
+            try:
+                out_path = tracker.finish_run()
+                print(f"✅ Token tracking completado. Log guardado en: {out_path}")
+            except Exception as tracker_error:
+                evaluation_logger.log_error("API", f"Error finalizando token tracker: {str(tracker_error)}")
+        
         return AnalysisResponse(
             status="success",
             message=f"Evaluación del meet {meet_id} completada exitosamente" + (f" - Email enviado" if email_sent else ""),
@@ -860,6 +890,12 @@ Sistema de Evaluación de Candidatos
         
     except Exception as e:
         evaluation_logger.log_error("API", f"Error en evaluación de meet: {str(e)}")
+        # Finalizar tracking incluso si hay error
+        if tracker:
+            try:
+                tracker.finish_run()
+            except:
+                pass
         raise HTTPException(status_code=500, detail=f"Error en la evaluación: {str(e)}")
     
     

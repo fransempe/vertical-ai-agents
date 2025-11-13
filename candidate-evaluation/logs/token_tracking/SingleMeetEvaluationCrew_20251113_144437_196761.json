@@ -1,0 +1,37 @@
+{
+  "run_id": "SingleMeetEvaluationCrew_20251113_144437_196761",
+  "crew_name": "SingleMeetEvaluationCrew",
+  "start_time": "2025-11-13T14:44:37.196761",
+  "meta": {
+    "meet_id": "92216552-58a4-4a0d-b4fd-846ad05da152"
+  },
+  "steps": [
+    {
+      "step_name": "crew.kickoff",
+      "timestamp": "2025-11-13T14:46:38.882517",
+      "agent": null,
+      "task": null,
+      "usage": {
+        "total_tokens": 20291,
+        "prompt_tokens": 15047,
+        "completion_tokens": 5244,
+        "estimated": false
+      },
+      "extra": {
+        "usage_metrics": {
+          "total_tokens": 20291,
+          "prompt_tokens": 15047,
+          "completion_tokens": 5244
+        },
+        "result_meta": {
+          "has_raw": true
+        }
+      }
+    }
+  ],
+  "total_tokens": 20291,
+  "total_prompt_tokens": 15047,
+  "total_completion_tokens": 5244,
+  "end_time": "2025-11-13T14:46:41.310981",
+  "duration_seconds": 124.11422
+}
