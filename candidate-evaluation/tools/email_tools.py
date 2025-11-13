@@ -429,8 +429,7 @@ class GraphEmailMonitor:
         
         return None
 
-    def insert_jd_interview(self, interview_name: str, agent_id: str, job_description: str, 
-                           email_source: str, content: str = "", subject: str = "") -> Optional[Dict[str, Any]]:
+    def insert_jd_interview(self, interview_name: str, agent_id: str, job_description: str, content: str = "", subject: str = "") -> Optional[Dict[str, Any]]:
         """
         Inserta un nuevo registro en la tabla jd_interviews
         
@@ -438,7 +437,6 @@ class GraphEmailMonitor:
             interview_name: Nombre de la entrevista
             agent_id: ID del agente asignado
             job_description: Descripción del trabajo o contenido del email
-            email_source: Email de origen (from del email)
             content: Contenido completo del email (opcional, para extraer datos del cliente)
             subject: Asunto del email (opcional, para extraer datos del cliente)
             
@@ -447,16 +445,6 @@ class GraphEmailMonitor:
         """
         try:
             evaluation_logger.log_task_start("Insert JD Interview", "Insertando registro en jd_interviews")
-            
-            # Extraer email limpio del email_source
-            clean_email = self.extract_clean_email(email_source)
-            
-            # Obtener o crear cliente basado en el email
-            client_id = self.get_or_create_client(clean_email, content, subject)
-            
-            if not client_id:
-                evaluation_logger.log_error("Insert JD Interview", "No se pudo obtener o crear el cliente")
-                return None
             
             # Crear jd_interview con client_id
             data = {
@@ -768,7 +756,6 @@ class GraphEmailMonitor:
                     interview_name=interview_name,
                     agent_id=agent_id,
                     job_description=content,
-                    email_source=sender,
                     content=content,
                     subject=subject
                 )

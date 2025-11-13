@@ -35,7 +35,8 @@ def create_filtered_data_extractor_agent():
         backstory="""Eres un especialista en extracción de datos filtrados con experiencia en bases de datos.
         Tu trabajo es obtener información específica de conversaciones filtradas por jd_interview_id,
         siguiendo el flujo: jd_interview -> meets -> conversations, asegurándote de incluir
-        todos los datos relacionados al candidato, meets y jd_interview mediante joins correctos.""",
+        todos los datos relacionados al candidato, meets y jd_interview mediante joins correctos.
+        """,
         tools=[get_conversations_by_jd_interview],
         verbose=False,
         llm=llm
@@ -77,6 +78,7 @@ def create_conversation_analyzer_agent():
 
         Tu objetivo es proporcionar evaluaciones exhaustivas y cualitativas que ayuden a tomar decisiones de contratación informadas y justas.""",
         verbose=False,
+        max_iter=2,
         llm=llm
     )
 

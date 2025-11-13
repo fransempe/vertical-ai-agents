@@ -179,7 +179,7 @@ def send_evaluation_email(subject: str, body: str) -> str:
     Args:
         subject: Asunto del email
         body: Cuerpo del email con los resultados
-        
+        jd_interview_id: ID del jd_interview asociado al análisis
     Returns:
         JSON string con el resultado del envío
     """
@@ -188,11 +188,12 @@ def send_evaluation_email(subject: str, body: str) -> str:
         evaluation_logger.log_task_progress("Envío de Email", f"Preparando email: {subject}")
         
         email_api_url = os.getenv("EMAIL_API_URL", "http://127.0.0.1:8004/send-simple-email")
+        
         # Detectar destinatario dinámicamente desde el cuerpo del reporte si hay algún email
         to_email = os.getenv("REPORT_TO_EMAIL", "")
         try:
             import re as _re
-            # Buscar el primer email en el cuerpo (por ejemplo, jd_interview_email_source o similares)
+            # Buscar el primer email en el cuerpo
             email_match = _re.search(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", body or "")
             if not to_email and email_match:
                 to_email = email_match.group(0)
@@ -328,7 +329,7 @@ def get_all_jd_interviews() -> str:
                 "interview_name": row.get('interview_name'),
                 "agent_id": row.get('agent_id'),
                 "job_description": row.get('job_description'),
-                "email_source": row.get('email_source'),
+                "client_id": row.get('client_id'),
                 "created_at": row.get('created_at')
             }
             interviews.append(interview)
@@ -370,7 +371,7 @@ def get_jd_interviews_data(interview_id: str = None) -> str:
                 "interview_name": row.get('interview_name'),
                 "agent_id": row.get('agent_id'),
                 "job_description": row.get('job_description'),
-                "email_source": row.get('email_source'),
+                "client_id": row.get('client_id'),
                 "created_at": row.get('created_at')
             }
             interviews.append(interview)
@@ -444,6 +445,18 @@ def get_conversations_by_jd_interview(jd_interview_id: str, limit: int = 100) ->
         jd_interview = jd_interview_response.data[0]
         evaluation_logger.log_task_progress("Obtener Conversaciones por JD Interview", f"JD Interview encontrado: {jd_interview.get('interview_name', 'N/A')}")
         
+        # 1.5. Obtener datos del cliente usando client_id del jd_interview
+        client_id = jd_interview.get('client_id')
+        client_data = None
+        if client_id:
+            try:
+                client_response = supabase.table('clients').select('id, name, email, responsible').eq('id', client_id).limit(1).execute()
+                if client_response.data and len(client_response.data) > 0:
+                    client_data = client_response.data[0]
+                    evaluation_logger.log_task_progress("Obtener Conversaciones por JD Interview", f"Cliente encontrado: {client_data.get('name', 'N/A')}")
+            except Exception as client_error:
+                evaluation_logger.log_error("Obtener Conversaciones por JD Interview", f"Error obteniendo datos del cliente: {str(client_error)}")
+        
         # 2. Buscar meets que tengan jd_interviews_id = jd_interview_id
         meets_response = supabase.table('meets').select('*').eq('jd_interviews_id', jd_interview_id).execute()
         
@@ -454,10 +467,10 @@ def get_conversations_by_jd_interview(jd_interview_id: str, limit: int = 100) ->
                 "jd_interview_id": jd_interview_id,
                 "jd_interview_name": jd_interview.get('interview_name'),
                 "jd_interview_agent_id": jd_interview.get('agent_id'),
-                "jd_interview_email_source": jd_interview.get('email_source'),
+                "client": client_data,
                 "conversations": [],
                 "total_conversations": 0
-            }, indent=2)
+            }, indent=2, ensure_ascii=False)
         
         meet_ids = [meet['id'] for meet in meets_response.data]
         evaluation_logger.log_task_progress("Obtener Conversaciones por JD Interview", f"Encontrados {len(meet_ids)} meets")
@@ -490,7 +503,7 @@ def get_conversations_by_jd_interview(jd_interview_id: str, limit: int = 100) ->
                     "jd_interview_id": jd_interview_id,
                     "jd_interview_name": jd_interview.get('interview_name'),
                     "jd_interview_agent_id": jd_interview.get('agent_id'),
-                    "jd_interview_email_source": jd_interview.get('email_source')
+                    "client": client_data
                 }
                 conversations.append(conversation)
         
@@ -502,13 +515,15 @@ def get_conversations_by_jd_interview(jd_interview_id: str, limit: int = 100) ->
                 "jd_interview_id": jd_interview_id,
                 "jd_interview_name": jd_interview.get('interview_name'),
                 "jd_interview_agent_id": jd_interview.get('agent_id'),
-                "jd_interview_email_source": jd_interview.get('email_source'),
+                "client": client_data,
                 "conversations": [],
                 "total_conversations": 0
-            }, indent=2)
+            }, indent=2, ensure_ascii=False)
+            
+        print("conversations: ", conversations)
         
         evaluation_logger.log_task_complete("Obtener Conversaciones por JD Interview", f"{len(conversations)} conversaciones filtradas obtenidas")
-        return json.dumps(conversations, indent=2)
+        return json.dumps(conversations, indent=2, ensure_ascii=False)
         
     except Exception as e:
         evaluation_logger.log_error("Obtener Conversaciones por JD Interview", f"Error obteniendo conversaciones filtradas: {str(e)}")
@@ -537,7 +552,7 @@ def get_meet_evaluation_data(meet_id: str) -> str:
         meet_response = supabase.table('meets').select(
             '''
             *,
-            jd_interviews(id, interview_name, agent_id, job_description, email_source, created_at)
+            jd_interviews(id, interview_name, agent_id, job_description, client_id, created_at)
             '''
         ).eq('id', meet_id).execute()
         
@@ -556,6 +571,17 @@ def get_meet_evaluation_data(meet_id: str) -> str:
             candidates(id, name, email, phone, cv_url, tech_stack)
             '''
         ).eq('meet_id', meet_id).execute()
+        
+        client_response = supabase.table('clients').select('*').eq('id', meet.get('jd_interviews').get('client_id')).execute()
+        print("client_id: ", meet.get('jd_interviews').get('client_id'))
+        print("client: ", client_response.data)
+        
+        client_data = None
+        if client_response.data and len(client_response.data) > 0:
+            client_data = client_response.data[0]
+            os.environ["REPORT_TO_EMAIL"] = client_data.get('email')
+        else:
+            os.environ["REPORT_TO_EMAIL"] = "flocklab.id@gmail.com"
         
         conversation = None
         if conversation_response.data and len(conversation_response.data) > 0:
@@ -586,49 +612,19 @@ def get_meet_evaluation_data(meet_id: str) -> str:
                 "updated_at": meet.get('updated_at')
             },
             "conversation": conversation,
-            "jd_interview": jd_interview
+            "jd_interview": jd_interview,
+            "client": client_data
         }
         
+        print("resultado de meet completa: ", result)
+        
         evaluation_logger.log_task_complete("Obtener Datos de Meet", f"Datos obtenidos exitosamente para meet: {meet_id}")
-        return json.dumps(result, indent=2)
+        return json.dumps(result, indent=2, ensure_ascii=False)
         
     except Exception as e:
         evaluation_logger.log_error("Obtener Datos de Meet", f"Error obteniendo datos: {str(e)}")
         return json.dumps({"error": f"Error obteniendo datos: {str(e)}"}, indent=2)
 
-@tool
-def get_jd_interview_email_source(jd_interview_id: str) -> str:
-    """
-    Obtiene el email_source de un jd_interview específico
-    
-    Args:
-        jd_interview_id: ID del jd_interview
-        
-    Returns:
-        JSON string con el email_source o error
-    """
-    try:
-        evaluation_logger.log_task_start("Obtener Email Source", f"Obteniendo email_source para jd_interview: {jd_interview_id}")
-        
-        url = os.getenv("SUPABASE_URL")
-        key = os.getenv("SUPABASE_KEY")
-        supabase = create_client(url, key)
-        
-        # Obtener jd_interview
-        response = supabase.table('jd_interviews').select('email_source').eq('id', jd_interview_id).execute()
-        
-        if not response.data:
-            evaluation_logger.log_error("Obtener Email Source", f"No se encontró jd_interview con ID: {jd_interview_id}")
-            return json.dumps({"error": f"No se encontró jd_interview con ID: {jd_interview_id}"}, indent=2)
-        
-        email_source = response.data[0].get('email_source')
-        
-        evaluation_logger.log_task_complete("Obtener Email Source", f"Email source obtenido: {email_source}")
-        return json.dumps({"email_source": email_source}, indent=2)
-        
-    except Exception as e:
-        evaluation_logger.log_error("Obtener Email Source", f"Error obteniendo email_source: {str(e)}")
-        return json.dumps({"error": f"Error obteniendo email_source: {str(e)}"}, indent=2)
 
 @tool
 def get_candidates_data(limit: int = 100) -> str:

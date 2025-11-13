@@ -214,7 +214,7 @@ async def trigger_analysis(request: AnalysisRequest = None):
         # Preparar variables de evaluación (se insertará al final)
         evaluation_id = None
         client_id = None
-        
+                        
         # Crear y ejecutar crew (filtrado o completo)
         if jd_interview_id:
             crew = create_filtered_data_processing_crew(jd_interview_id)
@@ -267,8 +267,7 @@ async def trigger_analysis(request: AnalysisRequest = None):
             execution_time=execution_time,
             results_file=filename,
             result=result_dict,
-            jd_interview_id=jd_interview_id,
-            evaluation_id=None,
+            jd_interview_id=jd_interview_id
         )
         
     except Exception as e:
@@ -622,7 +621,7 @@ async def evaluate_single_meet(request: SingleMeetRequest):
         
         start_time = datetime.now()
         
-        # Crear y ejecutar crew de evaluación individual
+        # Crear y ejecutar crew de evaluación individual        
         crew = create_single_meet_evaluation_crew(meet_id)
         result = crew.kickoff()
         
@@ -685,7 +684,7 @@ async def evaluate_single_meet(request: SingleMeetRequest):
                 result_data["is_potential_match"] = match_eval.get("is_potential_match")
                 result_data["compatibility_score"] = match_eval.get("compatibility_score")
         
-        # Si es un posible match, enviar email al email_source del JD interview
+        # Si es un posible match, enviar email del cliente del JD interview
         email_sent = False
         if result_data.get("is_potential_match") is True:
             try:

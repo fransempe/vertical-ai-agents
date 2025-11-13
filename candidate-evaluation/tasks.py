@@ -794,9 +794,9 @@ def create_filtered_extraction_task(agent, jd_interview_id: str):
         Asegurar que cada registro incluya:
         - meet_id, candidate_id, conversation_data (campos específicos de conversations)
         - Datos completos del candidato (id, name, email, phone, cv_url, tech_stack)
-        - Información del jd_interview (nombre, agent_id, email_source)
+        - Información del jd_interview (nombre, agent_id, client_id)
         """,
-        expected_output=f"Lista JSON de conversaciones filtradas por jd_interview_id: {jd_interview_id} con toda la información relacionada. Si no hay conversaciones, incluir mensaje informativo: 'No se han presentado candidatos para esta entrevista'. IMPORTANTE: Incluir siempre la información del jd_interview (id, name, agent_id, email_source) para usar en el título del reporte.",
+        expected_output=f"Lista JSON de conversaciones filtradas por jd_interview_id: {jd_interview_id} con toda la información relacionada. Si no hay conversaciones, incluir mensaje informativo: 'No se han presentado candidatos para esta entrevista'. IMPORTANTE: Incluir siempre la información del jd_interview (id, name, agent_id, client_id) para usar en el título del reporte.",
         agent=agent
     )
 
@@ -837,7 +837,7 @@ def create_matching_task(agent):
            - Para cada candidato con matches, incluir:
              * Datos completos del candidato (id, name, email, phone, cv_url, tech_stack)
              * Lista de entrevistas que coinciden con sus datos
-             * Para cada entrevista: registro completo de jd_interviews (id, interview_name, agent_id, job_description, email_source, created_at) + score de compatibilidad + análisis del match
+             * Para cada entrevista: registro completo de jd_interviews (id, interview_name, agent_id, job_description, client_id, created_at) + score de compatibilidad + análisis del match
         
         6. 📝 **Formato de Salida SIMPLIFICADO:**
            ```json
@@ -859,7 +859,7 @@ def create_matching_task(agent):
                        "interview_name": "Desarrollador React Senior",
                        "agent_id": "agent_123",
                        "job_description": "Buscamos desarrollador con React, JavaScript...",
-                       "email_source": "recruiting@company.com",
+                       "client_id": "client_456",
                        "created_at": "2025-01-18T10:30:00Z"
                      },
                      "compatibility_score": 85,
@@ -891,14 +891,16 @@ def create_single_meet_extraction_task(agent, meet_id: str):
         Extraer todos los datos necesarios para evaluar el meet con ID: {meet_id}
         
         Debes obtener:
-        - Información completa del meet (id, jd_interviews_id, fechas)
+        - Información completa del meet (id, jd_interviews_id)
         - Conversación asociada al meet (conversation_data)
         - Datos completos del candidato (id, name, email, phone, cv_url, tech_stack)
-        - Información del JD interview asociado (id, interview_name, agent_id, job_description, email_source)
+        - Información del JD interview asociado (id, interview_name, agent_id, job_description, client_id)
+        - Información del cliente asociado (id, name, email, phone)
         
         Usar get_meet_evaluation_data(meet_id="{meet_id}") para obtener todos los datos.
         """,
-        expected_output="JSON completo con meet, conversation, candidate y jd_interview",
+        expected_output="JSON completo con meet, conversation, candidate, jd_interview y client",
+        max_iter=2,
         agent=agent
     )
 
