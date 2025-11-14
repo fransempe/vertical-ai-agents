@@ -8,6 +8,7 @@ import json
 import base64
 import re
 import requests
+import tiktoken
 from datetime import datetime
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Request, BackgroundTasks, Response
@@ -21,7 +22,7 @@ from single_meet_crew import create_single_meet_evaluation_crew
 from utils.logger import evaluation_logger
 from supabase import create_client
 from tracking import TokenTracker
-from tools.token_estimator import estimate_cost, estimate_task_tokens
+from tools.token_estimator import estimate_cost, estimate_task_tokens, estimate_completion_tokens, breakdown_context_tokens
 from tools.supabase_tools import get_meet_evaluation_data
 from agents import create_single_meet_evaluator_agent
 from tasks import create_single_meet_extraction_task, create_single_meet_evaluation_task
@@ -532,11 +533,13 @@ async def outlook_webhook(request: Request):
     validation_token = request.query_params.get("validationToken")
     if validation_token:
         print("✅ Webhook validado por Microsoft")
+        return Response(content=validation_token, status_code=200)
         # Nota: se quita el return para permitir continuar con el flujo
     
     # Notificación real de email
     try:
         data = await request.json()
+        print("data: ", data)
         _events = len(data.get('value', [])) if isinstance(data, dict) else 0
         print(f"📧 Notificación recibida - {_events} evento(s)")
         
@@ -977,8 +980,12 @@ class TokenEstimationResponse(BaseModel):
     message: str
     meet_id: str
     model: str
-    estimated_tokens: int
-    estimated_cost_usd: float
+    estimated_input_tokens: int
+    estimated_completion_tokens: int
+    estimated_total_tokens: int
+    estimated_input_cost_usd: float
+    estimated_completion_cost_usd: float
+    estimated_total_cost_usd: float
     timestamp: str
 
 @app.post("/estimate-meet-tokens", response_model=TokenEstimationResponse)
@@ -1017,8 +1024,9 @@ async def estimate_meet_tokens(request: SingleMeetRequest):
         evaluator_agent = create_single_meet_evaluator_agent()
         extraction_task = create_single_meet_extraction_task(evaluator_agent, meet_id)
         evaluation_task = create_single_meet_evaluation_task(evaluator_agent, extraction_task)
-        
-        # Construir mensajes para estimación (simulando lo que se enviaría al LLM)
+
+        model = "gpt-5-nano"
+        # ===== TAREA 1: EXTRACTION TASK =====
         # System message con backstory del agente
         system_message = {
             "role": "system",
@@ -1029,49 +1037,151 @@ async def estimate_meet_tokens(request: SingleMeetRequest):
 Tu objetivo: {evaluator_agent.goal}"""
         }
         
-        # User message con descripción de la tarea + contexto (datos del meet)
-        task_description = evaluation_task.description
-        context_data = json.dumps(meet_data, indent=2, ensure_ascii=False) if meet_data else ""
+        # User message para extraction_task
+        extraction_user_message = {
+            "role": "user",
+            "content": extraction_task.description
+        }
         
-        user_message_content = f"""{task_description}
+        extraction_messages = [system_message, extraction_user_message]
+        extraction_input_tokens = estimate_task_tokens(extraction_messages, model)
+        
+        # Completion de extraction_task = los datos del meet (que ya tenemos)
+        extraction_output = json.dumps(meet_data, indent=2, ensure_ascii=False) if meet_data else ""
+        extraction_completion_tokens = estimate_completion_tokens(extraction_output, model)
+        
+        # ===== DESGLOSE DEL CONTEXTO =====
+        context_breakdown = breakdown_context_tokens(meet_data, model)
+        
+        # Calcular tokens de las descripciones de las tareas y backstory
+        try:
+            enc = tiktoken.encoding_for_model(model)
+        except KeyError:
+            enc = tiktoken.get_encoding("cl100k_base")
+        
+        # Tokens del backstory (compartido en ambas tareas)
+        backstory_tokens = len(enc.encode(system_message["content"]))
+        
+        # Tokens de descripción de cada tarea
+        extraction_task_description_tokens = len(enc.encode(extraction_task.description))
+        evaluation_task_description_tokens = len(enc.encode(evaluation_task.description))
+        
+        # Desglose del completion de extraction_task (los datos del meet)
+        extraction_completion_breakdown = breakdown_context_tokens(meet_data, model)
+        
+        # ===== TAREA 2: EVALUATION TASK =====
+        # User message con descripción de la tarea de evaluación + contexto (resultado de extraction_task)
+        evaluation_user_message_content = f"""{evaluation_task.description}
 
-## CONTEXTO - DATOS DEL MEET:
-{context_data}
+## CONTEXTO - DATOS DEL MEET (resultado de la tarea anterior):
+{extraction_output}
 
 ## SALIDA ESPERADA:
 {evaluation_task.expected_output}"""
         
-        user_message = {
+        evaluation_user_message = {
             "role": "user",
-            "content": user_message_content
+            "content": evaluation_user_message_content
         }
         
-        # Construir lista de mensajes
-        messages = [system_message, user_message]
+        evaluation_messages = [system_message, evaluation_user_message]
+        evaluation_input_tokens = estimate_task_tokens(evaluation_messages, model)
         
-        # Calcular estimación de tokens
-        model = "gpt-4o-mini"  # Modelo usado en agents.py
-        estimated_tokens = estimate_task_tokens(messages, model)
-        estimated_cost = estimate_cost(estimated_tokens, model)
+        # Completion de evaluation_task = JSON de evaluación completo
+        evaluation_completion_tokens = estimate_completion_tokens(evaluation_task.expected_output, model)
         
-        # Mostrar estimación
+        # Desglose del completion de evaluation_task (basado en expected_output)
+        # El expected_output es un JSON grande con análisis completo
+        evaluation_completion_text = evaluation_task.expected_output
+        evaluation_completion_breakdown = {
+            "total": evaluation_completion_tokens,
+            "estimated_soft_skills": int(evaluation_completion_tokens * 0.30),  # ~30% para análisis de habilidades blandas
+            "estimated_technical": int(evaluation_completion_tokens * 0.25),  # ~25% para análisis técnico
+            "estimated_jd_analysis": int(evaluation_completion_tokens * 0.15),  # ~15% para análisis de JD
+            "estimated_match_evaluation": int(evaluation_completion_tokens * 0.20),  # ~20% para evaluación de match
+            "estimated_structure": int(evaluation_completion_tokens * 0.10),  # ~10% para estructura JSON
+        }
+        
+        # ===== TOTALES =====
+        total_input_tokens = extraction_input_tokens + evaluation_input_tokens
+        total_completion_tokens = extraction_completion_tokens + evaluation_completion_tokens
+        
+        # Calcular costos separados
+        cost_breakdown = estimate_cost(total_input_tokens, total_completion_tokens, model)
+        
+        # Mostrar estimación detallada
         print(f"\n{'='*60}")
         print(f"📊 ESTIMACIÓN DE TOKENS PARA MEET: {meet_id}")
         print(f"{'='*60}")
-        print(f"Modelo: {model}")
-        print(f"Tokens estimados: {estimated_tokens:,}")
-        print(f"Costo estimado: ${estimated_cost:.4f} USD")
+        print(f"Modelo: {model}\n")
+        
+        print(f"📋 TAREA 1: EXTRACTION")
+        print(f"  Input tokens: {extraction_input_tokens:,}")
+        print(f"  Completion tokens: {extraction_completion_tokens:,}")
+        print(f"  Subtotal: {extraction_input_tokens + extraction_completion_tokens:,} tokens")
+        
+        print(f"\n  🔍 Desglose Input (Tarea 1):")
+        print(f"    Backstory del agente: {backstory_tokens:,} tokens (~{backstory_tokens/extraction_input_tokens*100:.1f}%)")
+        print(f"    Descripción de la tarea: {extraction_task_description_tokens:,} tokens (~{extraction_task_description_tokens/extraction_input_tokens*100:.1f}%)")
+        
+        print(f"\n  🔍 Desglose Completion (Tarea 1):")
+        print(f"    Conversation data: {extraction_completion_breakdown['conversation_data']:,} tokens (~{extraction_completion_breakdown['conversation_data']/extraction_completion_tokens*100:.1f}%)")
+        print(f"    Job description: {extraction_completion_breakdown['job_description']:,} tokens (~{extraction_completion_breakdown['job_description']/extraction_completion_tokens*100:.1f}%)")
+        print(f"    Tech stack: {extraction_completion_breakdown['tech_stack']:,} tokens (~{extraction_completion_breakdown['tech_stack']/extraction_completion_tokens*100:.1f}%)")
+        print(f"    Resto del JSON: {extraction_completion_breakdown['resto_json']:,} tokens (~{extraction_completion_breakdown['resto_json']/extraction_completion_tokens*100:.1f}%)")
+        print(f"    Total datos: {extraction_completion_breakdown['total_context']:,} tokens\n")
+        
+        print(f"📋 TAREA 2: EVALUATION")
+        print(f"  Input tokens: {evaluation_input_tokens:,}")
+        print(f"  Completion tokens: {evaluation_completion_tokens:,}")
+        print(f"  Subtotal: {evaluation_input_tokens + evaluation_completion_tokens:,} tokens")
+        
+        print(f"\n  🔍 Desglose Input (Tarea 2):")
+        print(f"    Backstory del agente: {backstory_tokens:,} tokens (~{backstory_tokens/evaluation_input_tokens*100:.1f}%)")
+        print(f"    Descripción de la tarea: {evaluation_task_description_tokens:,} tokens (~{evaluation_task_description_tokens/evaluation_input_tokens*100:.1f}%)")
+        print(f"    Conversation data: {context_breakdown['conversation_data']:,} tokens (~{context_breakdown['conversation_data']/evaluation_input_tokens*100:.1f}%)")
+        print(f"    Job description: {context_breakdown['job_description']:,} tokens (~{context_breakdown['job_description']/evaluation_input_tokens*100:.1f}%)")
+        print(f"    Tech stack: {context_breakdown['tech_stack']:,} tokens (~{context_breakdown['tech_stack']/evaluation_input_tokens*100:.1f}%)")
+        print(f"    Resto del JSON (estructura/metadatos): {context_breakdown['resto_json']:,} tokens (~{context_breakdown['resto_json']/evaluation_input_tokens*100:.1f}%)")
+        print(f"    Total contexto: {context_breakdown['total_context']:,} tokens (~{context_breakdown['total_context']/evaluation_input_tokens*100:.1f}%)")
+        
+        print(f"\n  🔍 Desglose Completion (Tarea 2):")
+        print(f"    Análisis habilidades blandas: ~{evaluation_completion_breakdown['estimated_soft_skills']:,} tokens (~{evaluation_completion_breakdown['estimated_soft_skills']/evaluation_completion_tokens*100:.1f}%)")
+        print(f"    Análisis técnico: ~{evaluation_completion_breakdown['estimated_technical']:,} tokens (~{evaluation_completion_breakdown['estimated_technical']/evaluation_completion_tokens*100:.1f}%)")
+        print(f"    Análisis JD: ~{evaluation_completion_breakdown['estimated_jd_analysis']:,} tokens (~{evaluation_completion_breakdown['estimated_jd_analysis']/evaluation_completion_tokens*100:.1f}%)")
+        print(f"    Evaluación de match: ~{evaluation_completion_breakdown['estimated_match_evaluation']:,} tokens (~{evaluation_completion_breakdown['estimated_match_evaluation']/evaluation_completion_tokens*100:.1f}%)")
+        print(f"    Estructura JSON: ~{evaluation_completion_breakdown['estimated_structure']:,} tokens (~{evaluation_completion_breakdown['estimated_structure']/evaluation_completion_tokens*100:.1f}%)")
+        print(f"    Total completion: {evaluation_completion_tokens:,} tokens\n")
+        
+        print(f"📊 TOTALES")
+        print(f"  Input tokens totales: {total_input_tokens:,}")
+        print(f"  Completion tokens totales: {total_completion_tokens:,}")
+        print(f"  Total tokens: {cost_breakdown['total_tokens']:,}\n")
+        
+        print(f"💰 COSTOS")
+        print(f"  Costo Input: ${cost_breakdown['input_cost']:.4f} USD")
+        print(f"  Costo Completion: ${cost_breakdown['output_cost']:.4f} USD")
+        print(f"  Costo Total: ${cost_breakdown['total_cost']:.4f} USD")
         print(f"{'='*60}\n")
         
-        evaluation_logger.log_task_complete("API", f"Estimación completada: {estimated_tokens:,} tokens | ${estimated_cost:.4f} USD")
+        evaluation_logger.log_task_complete(
+            "API", 
+            f"Estimación completada: {cost_breakdown['total_tokens']:,} tokens totales "
+            f"({total_input_tokens:,} input + {total_completion_tokens:,} completion) | "
+            f"${cost_breakdown['total_cost']:.4f} USD"
+        )
         
         return TokenEstimationResponse(
             status="success",
             message=f"Estimación de tokens calculada exitosamente",
             meet_id=meet_id,
             model=model,
-            estimated_tokens=estimated_tokens,
-            estimated_cost_usd=estimated_cost,
+            estimated_input_tokens=total_input_tokens,
+            estimated_completion_tokens=total_completion_tokens,
+            estimated_total_tokens=cost_breakdown['total_tokens'],
+            estimated_input_cost_usd=cost_breakdown['input_cost'],
+            estimated_completion_cost_usd=cost_breakdown['output_cost'],
+            estimated_total_cost_usd=cost_breakdown['total_cost'],
             timestamp=datetime.now().isoformat()
         )
         
