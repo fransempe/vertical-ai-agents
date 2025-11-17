@@ -30,7 +30,6 @@ def create_single_meet_evaluation_crew(meet_id: str):
         
         if func_to_call:
             data = func_to_call(meet_id)
-            print("data: ", data)
         else:
             print("No se pudo acceder a la función subyacente del Tool")
     except Exception as e:

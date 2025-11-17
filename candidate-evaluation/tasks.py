@@ -897,7 +897,11 @@ def create_single_meet_extraction_task(agent, meet_id: str):
         - Información del JD interview asociado (id, interview_name, agent_id, job_description, client_id)
         - Información del cliente asociado (id, name, email, phone)
         
-        Usar get_meet_evaluation_data(meet_id="{meet_id}") para obtener todos los datos.
+        **IMPORTANTE:** Debes usar la herramienta get_meet_evaluation_data pasando el meet_id: {meet_id}
+        El meet_id que debes usar es: {meet_id}
+        NO uses placeholders como "<MEET_ID>" o variables, usa el valor exacto: {meet_id}
+        
+        Ejemplo de uso correcto: get_meet_evaluation_data(meet_id="{meet_id}")
         """,
         expected_output="JSON completo con meet, conversation, candidate, jd_interview y client",
         max_iter=2,
@@ -1044,11 +1048,42 @@ def create_single_meet_evaluation_task(agent, extraction_task):
         }}
         ```
         
+        **⚠️ PROHIBICIÓN ABSOLUTA - REGLAS CRÍTICAS:**
+        
+        1. **NUNCA INVENTES DATOS:**
+           - NO inventes nombres, emails, teléfonos, proyectos, empresas o experiencias
+           - NO inventes respuestas del candidato que no estén en conversation_data
+           - NO inventes preguntas técnicas que no estén en la conversación
+           - NO inventes datos de clientes o empresas
+           - NO asumas información que no esté explícitamente en los datos proporcionados
+        
+        2. **SOLO USA DATOS REALES:**
+           - Usa ÚNICAMENTE la información que viene de get_meet_evaluation_data
+           - Todo debe estar basado en conversation_data, candidate, jd_interview o client
+           - Si no hay evidencia para evaluar algo, escribe: "No hay evidencia suficiente en los datos proporcionados"
+        
+        3. **PARA HABILIDADES BLANDAS:**
+           - Analiza SOLO lo que el candidato dijo o demostró en la conversación
+           - Si no hay evidencia de una habilidad, indica: "No se encontró evidencia suficiente en la conversación"
+           - NO inventes ejemplos o situaciones que no estén en conversation_data
+        
+        4. **PARA PREGUNTAS TÉCNICAS:**
+           - Copia EXACTAMENTE el texto de las preguntas que están en conversation_data
+           - Copia EXACTAMENTE las respuestas del candidato que están en conversation_data
+           - NO inventes preguntas o respuestas que no estén en los datos
+           - Si no hay preguntas técnicas en la conversación, indica: "No se encontraron preguntas técnicas en la conversación"
+        
+        5. **PARA EVALUACIÓN DE MATCH:**
+           - Compara SOLO lo que está en los datos reales
+           - NO inventes tecnologías, proyectos o experiencias del candidato
+           - NO inventes requisitos de la JD que no estén en job_description
+        
         IMPORTANTE: 
         - Ser exhaustivo pero conciso
-        - Basar todas las evaluaciones en evidencia específica
+        - Basar todas las evaluaciones en evidencia específica REAL de los datos
+        - Si no hay evidencia, indicarlo claramente en lugar de inventar
         - Todo el análisis en ESPAÑOL LATINO
-        - Proporcionar justificaciones claras para la determinación de match
+        - Proporcionar justificaciones claras para la determinación de match basadas SOLO en datos reales
         """,
         expected_output="JSON completo con análisis exhaustivo y determinación de match potencial",
         agent=agent,

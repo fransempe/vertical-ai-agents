@@ -597,7 +597,8 @@ def get_meet_evaluation_data(meet_id: str) -> str:
                     "phone": row['candidates']['phone'] if row['candidates'] else None,
                     "cv_url": row['candidates']['cv_url'] if row['candidates'] else None,
                     "tech_stack": row['candidates']['tech_stack'] if row['candidates'] else None
-                }
+                },
+                "client": client_data
             }
         
         # 3. Obtener JD interview
@@ -616,7 +617,7 @@ def get_meet_evaluation_data(meet_id: str) -> str:
             "client": client_data
         }
         
-        print("resultado de meet completa: ", result)
+        #print("resultado de meet completa: ", result)
         
         evaluation_logger.log_task_complete("Obtener Datos de Meet", f"Datos obtenidos exitosamente para meet: {meet_id}")
         return json.dumps(result, indent=2, ensure_ascii=False)
@@ -624,6 +625,164 @@ def get_meet_evaluation_data(meet_id: str) -> str:
     except Exception as e:
         evaluation_logger.log_error("Obtener Datos de Meet", f"Error obteniendo datos: {str(e)}")
         return json.dumps({"error": f"Error obteniendo datos: {str(e)}"}, indent=2)
+
+@tool
+def save_meet_evaluation(full_result: str) -> str:
+    """
+    Guarda la evaluación de un meet en la tabla meet_evaluation.
+    
+    Args:
+        full_result: JSON string o dict con la evaluación completa del meet.
+                     Debe contener: meet_id, candidate.id, jd_interview.id, 
+                     conversation_analysis, match_evaluation, etc.
+        
+    Returns:
+        JSON string con el resultado de la operación (success, evaluation_id o error)
+    """
+    try:
+        evaluation_logger.log_task_start("Guardar Meet Evaluation", "Preparando guardado de evaluación de meet")
+        
+        url = os.getenv("SUPABASE_URL")
+        key = os.getenv("SUPABASE_KEY")
+        supabase = create_client(url, key)
+        
+        # Parsear full_result si viene como string
+        if isinstance(full_result, str):
+            try:
+                result_data = json.loads(full_result)
+            except json.JSONDecodeError:
+                evaluation_logger.log_error("Guardar Meet Evaluation", "Error parseando full_result como JSON")
+                return json.dumps({
+                    "success": False,
+                    "error": "Error parseando full_result como JSON"
+                }, indent=2, ensure_ascii=False)
+        elif isinstance(full_result, dict):
+            result_data = full_result
+        else:
+            evaluation_logger.log_error("Guardar Meet Evaluation", f"full_result debe ser string o dict, recibido: {type(full_result)}")
+            return json.dumps({
+                "success": False,
+                "error": f"full_result debe ser string o dict, recibido: {type(full_result)}"
+            }, indent=2, ensure_ascii=False)
+        
+        # Extraer datos necesarios
+        meet_id = result_data.get('meet_id')
+        candidate_id = result_data.get('candidate', {}).get('id')
+        jd_interview_id = result_data.get('jd_interview', {}).get('id')
+        conversation_analysis = result_data.get('conversation_analysis', {})
+        match_evaluation = result_data.get('match_evaluation', {})
+        
+        # Validar campos requeridos
+        if not meet_id:
+            evaluation_logger.log_error("Guardar Meet Evaluation", "meet_id no encontrado en full_result")
+            return json.dumps({
+                "success": False,
+                "error": "meet_id es requerido"
+            }, indent=2, ensure_ascii=False)
+        
+        if not candidate_id:
+            evaluation_logger.log_error("Guardar Meet Evaluation", "candidate.id no encontrado en full_result")
+            return json.dumps({
+                "success": False,
+                "error": "candidate.id es requerido"
+            }, indent=2, ensure_ascii=False)
+        
+        if not jd_interview_id:
+            evaluation_logger.log_error("Guardar Meet Evaluation", "jd_interview.id no encontrado en full_result")
+            return json.dumps({
+                "success": False,
+                "error": "jd_interview.id es requerido"
+            }, indent=2, ensure_ascii=False)
+        
+        # Extraer technical_assessment, completeness_summary y alerts
+        technical_assessment_data = conversation_analysis.get('technical_assessment', {})
+        
+        # technical_assessment sin completeness_summary y alerts
+        technical_assessment = {
+            "knowledge_level": technical_assessment_data.get('knowledge_level'),
+            "practical_experience": technical_assessment_data.get('practical_experience'),
+            "technical_questions": technical_assessment_data.get('technical_questions', [])
+        }
+        
+        # completeness_summary
+        completeness_summary = technical_assessment_data.get('completeness_summary', {})
+        
+        # alerts
+        alerts = technical_assessment_data.get('alerts', [])
+        
+        # Preparar datos para insertar
+        now = datetime.now().isoformat()
+        
+        evaluation_data = {
+            "meet_id": meet_id,
+            "candidate_id": candidate_id,
+            "jd_interview_id": jd_interview_id,
+            "conversation_analysis": conversation_analysis,  # JSONB completo
+            "technical_assessment": technical_assessment,  # JSONB sin completeness_summary y alerts
+            "completeness_summary": completeness_summary,  # JSONB
+            "alerts": alerts,  # Array
+            "match_evaluation": match_evaluation,  # JSONB completo
+            "created_at": now,
+            "updated_at": now
+        }
+        
+        evaluation_logger.log_task_progress("Guardar Meet Evaluation", f"Insertando evaluación para meet_id: {meet_id}")
+        
+        # Verificar si ya existe una evaluación para este meet_id
+        existing = supabase.table('meet_evaluations').select('id').eq('meet_id', meet_id).execute()
+        
+        if existing.data and len(existing.data) > 0:
+            # Actualizar registro existente
+            evaluation_id = existing.data[0]['id']
+            evaluation_logger.log_task_progress("Guardar Meet Evaluation", f"Actualizando evaluación existente: {evaluation_id}")
+            
+            # Remover created_at para no actualizarlo
+            update_data = {k: v for k, v in evaluation_data.items() if k != 'created_at'}
+            
+            response = supabase.table('meet_evaluations').update(update_data).eq('id', evaluation_id).execute()
+            
+            if response.data:
+                evaluation_logger.log_task_complete("Guardar Meet Evaluation", f"Evaluación actualizada exitosamente: {evaluation_id}")
+                return json.dumps({
+                    "success": True,
+                    "evaluation_id": evaluation_id,
+                    "message": "Evaluación actualizada exitosamente",
+                    "action": "updated"
+                }, indent=2, ensure_ascii=False)
+            else:
+                evaluation_logger.log_error("Guardar Meet Evaluation", "Error actualizando evaluación")
+                return json.dumps({
+                    "success": False,
+                    "error": "Error actualizando evaluación en la base de datos"
+                }, indent=2, ensure_ascii=False)
+        else:
+            # Insertar nuevo registro
+            response = supabase.table('meet_evaluations').insert(evaluation_data).execute()
+            
+            if response.data and len(response.data) > 0:
+                evaluation_id = response.data[0].get('id')
+                evaluation_logger.log_task_complete("Guardar Meet Evaluation", f"Evaluación guardada exitosamente: {evaluation_id}")
+                return json.dumps({
+                    "success": True,
+                    "evaluation_id": evaluation_id,
+                    "message": "Evaluación guardada exitosamente",
+                    "action": "created"
+                }, indent=2, ensure_ascii=False)
+            else:
+                evaluation_logger.log_error("Guardar Meet Evaluation", "Error insertando evaluación - respuesta vacía")
+                return json.dumps({
+                    "success": False,
+                    "error": "Error insertando evaluación en la base de datos"
+                }, indent=2, ensure_ascii=False)
+        
+    except Exception as e:
+        evaluation_logger.log_error("Guardar Meet Evaluation", f"Error guardando evaluación: {str(e)}")
+        import traceback
+        evaluation_logger.log_error("Guardar Meet Evaluation", f"Traceback: {traceback.format_exc()}")
+        return json.dumps({
+            "success": False,
+            "error": f"Error guardando evaluación: {str(e)}"
+        }, indent=2, ensure_ascii=False)
 
 
 @tool

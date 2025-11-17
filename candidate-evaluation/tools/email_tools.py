@@ -546,50 +546,120 @@ class GraphEmailMonitor:
 
     def get_status_overview(self, jd_interview_id: str) -> Optional[Dict[str, Any]]:
         """
-        Consulta interview_evaluations por jd_interview_id y devuelve resumen,
+        Consulta meet_evaluations por jd_interview_id y devuelve resumen agrupado por candidatos,
         además de client y jd_interview relacionados.
         """
         try:
-            # Buscar evaluación por jd_interview_id
-            eval_resp = self.supabase.table('interview_evaluations').select(
-                'id,jd_interview_id,client_id,summary,candidates,ranking,candidates_count'
-            ).eq('jd_interview_id', jd_interview_id).limit(1).execute()
+            # Buscar todas las evaluaciones de meet para este jd_interview_id
+            eval_resp = self.supabase.table('meet_evaluations').select(
+                'meet_id,candidate_id,conversation_analysis,technical_assessment,completeness_summary,alerts,match_evaluation'
+            ).eq('jd_interview_id', jd_interview_id).execute()
 
-            if not eval_resp.data:
+            if not eval_resp.data or len(eval_resp.data) == 0:
                 return None
 
-            evaluation = eval_resp.data[0]
-            client = None
+            # Obtener jd_interview para conseguir client_id
+            jd_resp = self.supabase.table('jd_interviews').select(
+                'id,interview_name,agent_id,client_id,created_at'
+            ).eq('id', jd_interview_id).limit(1).execute()
+            
             jd = None
+            client_id = None
+            if jd_resp.data and len(jd_resp.data) > 0:
+                jd = jd_resp.data[0]
+                client_id = jd.get('client_id')
 
-            client_id = evaluation.get('client_id')
+            # Obtener datos del cliente
+            client = None
             if client_id:
                 cli_resp = self.supabase.table('clients').select(
                     'id,email,name,responsible,phone'
                 ).eq('id', client_id).limit(1).execute()
-                if cli_resp.data:
+                if cli_resp.data and len(cli_resp.data) > 0:
                     client = cli_resp.data[0]
 
-            jd_id = evaluation.get('jd_interview_id')
-            if jd_id:
-                jd_resp = self.supabase.table('jd_interviews').select(
-                    'id,interview_name,agent_id,client_id,created_at'
-                ).eq('id', jd_id).limit(1).execute()
-                if jd_resp.data:
-                    jd = jd_resp.data[0]
-
+            # Agrupar evaluaciones por candidato y construir estructura
+            candidates_data = []
+            candidate_ids_seen = set()
+            
+            for eval_record in eval_resp.data:
+                candidate_id = eval_record.get('candidate_id')
+                if not candidate_id or candidate_id in candidate_ids_seen:
+                    continue
+                
+                candidate_ids_seen.add(candidate_id)
+                
+                # Obtener datos del candidato
+                candidate_info = None
+                try:
+                    cand_resp = self.supabase.table('candidates').select(
+                        'id,name,email,phone,tech_stack,cv_url'
+                    ).eq('id', candidate_id).limit(1).execute()
+                    if cand_resp.data and len(cand_resp.data) > 0:
+                        candidate_info = cand_resp.data[0]
+                except Exception as e:
+                    evaluation_logger.log_error("Status Overview", f"Error obteniendo datos de candidato {candidate_id}: {str(e)}")
+                
+                # Extraer datos de la evaluación
+                conversation_analysis = eval_record.get('conversation_analysis', {})
+                technical_assessment = eval_record.get('technical_assessment', {})
+                completeness_summary = eval_record.get('completeness_summary', {})
+                alerts = eval_record.get('alerts', [])
+                match_evaluation = eval_record.get('match_evaluation', {})
+                
+                # Obtener compatibility_score para el ranking
+                compatibility_score = match_evaluation.get('compatibility_score', 0) if isinstance(match_evaluation, dict) else 0
+                
+                candidate_data = {
+                    'candidate': candidate_info,
+                    'meet_id': eval_record.get('meet_id'),
+                    'conversation_analysis': conversation_analysis,
+                    'technical_assessment': technical_assessment,
+                    'completeness_summary': completeness_summary,
+                    'alerts': alerts,
+                    'match_evaluation': match_evaluation,
+                    'compatibility_score': compatibility_score
+                }
+                
+                candidates_data.append(candidate_data)
+            
+            # Ordenar por compatibility_score descendente y tomar top 5 para ranking
+            candidates_data_sorted = sorted(
+                candidates_data, 
+                key=lambda x: x.get('compatibility_score', 0), 
+                reverse=True
+            )
+            
+            ranking = []
+            for i, cand in enumerate(candidates_data_sorted[:5], 1):
+                candidate_info = cand.get('candidate', {})
+                match_eval = cand.get('match_evaluation', {})
+                
+                ranking_item = {
+                    'position': i,
+                    'candidate_id': candidate_info.get('id') if candidate_info else None,
+                    'candidate_name': candidate_info.get('name', 'N/A') if candidate_info else 'N/A',
+                    'compatibility_score': cand.get('compatibility_score', 0),
+                    'final_recommendation': match_eval.get('final_recommendation', 'N/A') if isinstance(match_eval, dict) else 'N/A',
+                    'justification': match_eval.get('justification', 'N/A') if isinstance(match_eval, dict) else 'N/A',
+                    'is_potential_match': match_eval.get('is_potential_match', False) if isinstance(match_eval, dict) else False
+                }
+                ranking.append(ranking_item)
+            
             # Construir respuesta con los campos requeridos
             overview = {
-                'summary': evaluation.get('summary'),
-                'candidates': evaluation.get('candidates'),
-                'ranking': evaluation.get('ranking'),
-                'candidates_count': evaluation.get('candidates_count'),
+                'candidates': candidates_data_sorted,  # Todos los candidatos ordenados
+                'ranking': ranking,  # Top 5 candidatos
+                'candidates_count': len(candidates_data),
                 'client': client,
                 'jd_interview': jd
             }
+            
             return overview
         except Exception as e:
             evaluation_logger.log_error("Status Overview", f"Error consultando estado: {str(e)}")
+            import traceback
+            evaluation_logger.log_error("Status Overview", f"Traceback: {traceback.format_exc()}")
             return None
 
     def send_status_overview_email(self, to_email: str, jd_interview_id: str, overview: Dict[str, Any]) -> bool:
@@ -633,11 +703,9 @@ class GraphEmailMonitor:
         try:
             client = overview.get('client') or {}
             jd = overview.get('jd_interview') or {}
-            summary = overview.get('summary') or {}
-            kpis = (summary or {}).get('kpis') or {}
-            candidates = overview.get('candidates') or {}
+            candidates_list = overview.get('candidates') or []
             ranking = overview.get('ranking') or []
-            candidates_count = overview.get('candidates_count')
+            candidates_count = overview.get('candidates_count', 0)
 
             client_name = client.get('name', 'N/A')
             client_email = client.get('email', 'N/A')
@@ -645,42 +713,96 @@ class GraphEmailMonitor:
             client_phone = client.get('phone', 'N/A')
             interview_name = jd.get('interview_name', 'N/A')
 
-            avg_score = kpis.get('avg_score', 'N/A')
-            completed_interviews = kpis.get('completed_interviews', 'N/A')
-            # Notas removidas del formato final
+            # Calcular score promedio
+            avg_score = 'N/A'
+            if isinstance(candidates_list, list) and len(candidates_list) > 0:
+                scores = [c.get('compatibility_score', 0) for c in candidates_list if isinstance(c, dict)]
+                if scores:
+                    avg_score = round(sum(scores) / len(scores), 2)
 
-            # Armar listado de candidatos (a partir de candidates dict)
+            # Armar listado de candidatos con información detallada
             candidate_lines = []
-            if isinstance(candidates, dict):
-                # Ordenar por score desc si posible
-                try:
-                    sorted_items = sorted(candidates.items(), key=lambda kv: (kv[1] or {}).get('score', 0), reverse=True)
-                except Exception:
-                    sorted_items = candidates.items()
-                for cid, cdata in sorted_items:
-                    if not isinstance(cdata, dict):
+            if isinstance(candidates_list, list):
+                for cand in candidates_list:
+                    if not isinstance(cand, dict):
                         continue
-                    cname = cdata.get('name', 'N/A')
-                    cscore = cdata.get('score', 'N/A')
-                    creco = cdata.get('recommendation', 'N/A')
-                    candidate_lines.append(f"• {cname}  🏅 {cscore}  | 🧭 {creco}")
+                    candidate_info = cand.get('candidate', {})
+                    match_eval = cand.get('match_evaluation', {})
+                    conversation_analysis = cand.get('conversation_analysis', {})
+                    technical_assessment = cand.get('technical_assessment', {})
+                    completeness_summary = cand.get('completeness_summary', {})
+                    alerts = cand.get('alerts', [])
+                    
+                    # Información básica
+                    cname = candidate_info.get('name', 'N/A') if candidate_info else 'N/A'
+                    cemail = candidate_info.get('email', 'N/A') if candidate_info else 'N/A'
+                    cphone = candidate_info.get('phone', 'N/A') if candidate_info else 'N/A'
+                    cscore = cand.get('compatibility_score', 'N/A')
+                    creco = match_eval.get('final_recommendation', 'N/A') if isinstance(match_eval, dict) else 'N/A'
+                    is_match = match_eval.get('is_potential_match', False) if isinstance(match_eval, dict) else False
+                    match_icon = "✅" if is_match else "❌"
+                    
+                    # Tech stack
+                    tech_stack = candidate_info.get('tech_stack', []) if candidate_info else []
+                    tech_stack_str = ', '.join(tech_stack[:5]) if isinstance(tech_stack, list) and len(tech_stack) > 0 else 'N/A'
+                    if isinstance(tech_stack, list) and len(tech_stack) > 5:
+                        tech_stack_str += f" (+{len(tech_stack) - 5} más)"
+                    
+                    # Nivel técnico
+                    knowledge_level = technical_assessment.get('knowledge_level', 'N/A') if isinstance(technical_assessment, dict) else 'N/A'
+                    practical_experience = technical_assessment.get('practical_experience', 'N/A') if isinstance(technical_assessment, dict) else 'N/A'
+                    
+                    # Completeness summary
+                    total_questions = completeness_summary.get('total_questions', 0) if isinstance(completeness_summary, dict) else 0
+                    fully_answered = completeness_summary.get('fully_answered', 0) if isinstance(completeness_summary, dict) else 0
+                    completeness_pct = round((fully_answered / total_questions * 100) if total_questions > 0 else 0, 1)
+                    
+                    # Fortalezas y preocupaciones
+                    strengths = match_eval.get('strengths', []) if isinstance(match_eval, dict) else []
+                    concerns = match_eval.get('concerns', []) if isinstance(match_eval, dict) else []
+                    strengths_str = ', '.join(strengths[:3]) if strengths else 'N/A'
+                    concerns_str = ', '.join(concerns[:2]) if concerns else 'Ninguna'
+                    
+                    # CV URL
+                    cv_url = candidate_info.get('cv_url', '') if candidate_info else ''
+                    cv_link = f"📄 CV: {cv_url}" if cv_url else "📄 CV: No disponible"
+                    
+                    # Alerts
+                    alerts_str = ""
+                    if isinstance(alerts, list) and len(alerts) > 0:
+                        alerts_str = f"\n   ⚠️ Alertas: {', '.join(str(a) for a in alerts[:3])}"
+                    
+                    # Construir línea de candidato con información detallada
+                    candidate_line = (
+                        f"• {match_icon} {cname}  🏅 {cscore}%  | 🧭 {creco}\n"
+                        f"   📧 {cemail}  | ☎️ {cphone}\n"
+                        f"   💻 Tech Stack: {tech_stack_str}\n"
+                        f"   📊 Nivel: {knowledge_level}  | 💼 Experiencia: {practical_experience}\n"
+                        f"   ✅ Completitud: {completeness_pct}% ({fully_answered}/{total_questions} preguntas)\n"
+                        f"   💪 Fortalezas: {strengths_str}\n"
+                        f"   ⚠️ Preocupaciones: {concerns_str}\n"
+                        f"   {cv_link}{alerts_str}"
+                    )
+                    
+                    candidate_lines.append(candidate_line)
 
-            # Armar ranking
+            # Armar ranking (top 5)
             ranking_lines = []
             if isinstance(ranking, list):
-                for i, r in enumerate(ranking, 1):
+                for r in ranking:
                     if not isinstance(r, dict):
                         continue
-                    rname = r.get('name', 'N/A')
-                    rscore = r.get('score', 'N/A')
-                    rmatch = r.get('nivel_matcheo', 'N/A')
-                    rid = r.get('candidate_id', 'N/A')
-                    strengths = r.get('fortalezas_clave') or []
-                    strengths_str = ', '.join(strengths) if strengths else 'N/A'
-                    analisis = r.get('analisis', 'N/A')
-                    medal = "🥇" if i == 1 else ("🥈" if i == 2 else ("🥉" if i == 3 else f"#{i}"))
+                    position = r.get('position', 0)
+                    rname = r.get('candidate_name', 'N/A')
+                    rscore = r.get('compatibility_score', 'N/A')
+                    rreco = r.get('final_recommendation', 'N/A')
+                    rjust = r.get('justification', 'N/A')
+                    is_match = r.get('is_potential_match', False)
+                    match_icon = "✅" if is_match else "❌"
+                    
+                    medal = "🥇" if position == 1 else ("🥈" if position == 2 else ("🥉" if position == 3 else f"#{position}"))
                     ranking_lines.append(
-                        f"{medal} {rname}  🏅 {rscore}  | 🔗 {rmatch}\n   💪 {strengths_str}\n   📝 {analisis}"
+                        f"{medal} {match_icon} {rname}  🏅 {rscore}%  | 🧭 {rreco}\n   📝 {rjust}"
                     )
 
             subject = f"📊 Status {jd_interview_id} • {interview_name}"
@@ -690,25 +812,28 @@ class GraphEmailMonitor:
                 f"🏢 Cliente: {client_name} ({client_email})\n"
                 f"👤 Responsable: {client_resp}   ☎️ {client_phone}\n"
                 f"🗂️ Entrevista: {interview_name}   🆔 {jd_interview_id}\n"
-                f"👥 Candidatos: {candidates_count if candidates_count is not None else 'N/A'}\n"
+                f"👥 Candidatos evaluados: {candidates_count}\n"
             )
 
             kpis_block = (
                 f"\n📈 KPIs:\n"
-                f"• ⭐ Score promedio: {avg_score}\n"
-                f"• ✅ Entrevistas completadas: {completed_interviews}\n"
+                f"• ⭐ Score promedio: {avg_score}%\n"
+                f"• ✅ Entrevistas completadas: {candidates_count}\n"
             )
 
             candidates_block = "\n👥 Candidatos:\n" + ("\n".join(candidate_lines) if candidate_lines else "Sin datos de candidatos")
 
-            ranking_block = "\n\n🏆 Ranking:\n" + ("\n\n".join(ranking_lines) if ranking_lines else "Sin ranking disponible")
+            ranking_block = "\n\n🏆 Ranking Top 5:\n" + ("\n\n".join(ranking_lines) if ranking_lines else "Sin ranking disponible")
 
             footer = "\n\nSaludos,\nSistema de Evaluación de Candidatos\n"
 
             body = header + kpis_block + "\n" + candidates_block + ranking_block + footer
+            
+            print("body: ", body)
             return subject, body
-        except Exception:
+        except Exception as e:
             # Fallback al JSON si hay un error formateando
+            evaluation_logger.log_error("Format Status Email", f"Error formateando email: {str(e)}")
             return f"📊 Status {jd_interview_id}", json.dumps(overview, indent=2, ensure_ascii=False)
 
     def process_email_content(self, email_data: Dict[str, Any]) -> None:

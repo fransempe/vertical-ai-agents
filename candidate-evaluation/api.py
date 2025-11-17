@@ -10,6 +10,7 @@ import re
 import requests
 import tiktoken
 from datetime import datetime
+from pathlib import Path
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Request, BackgroundTasks, Response
 import httpx
@@ -23,7 +24,7 @@ from utils.logger import evaluation_logger
 from supabase import create_client
 from tracking import TokenTracker
 from tools.token_estimator import estimate_cost, estimate_task_tokens, estimate_completion_tokens, breakdown_context_tokens
-from tools.supabase_tools import get_meet_evaluation_data
+from tools.supabase_tools import get_meet_evaluation_data, save_meet_evaluation
 from agents import create_single_meet_evaluator_agent
 from tasks import create_single_meet_extraction_task, create_single_meet_evaluation_task
 
@@ -128,6 +129,51 @@ def format_technical_questions(questions: list) -> str:
         formatted.append(f"  {i}. {question_text} - Contestada: {answered}")
     
     return "\n".join(formatted) if formatted else "No disponible"
+
+def load_email_template(template_name: str) -> str:
+    """
+    Carga una plantilla de email desde el directorio templates/email
+    
+    Args:
+        template_name: Nombre del archivo de plantilla (ej: 'evaluation_match.html')
+        
+    Returns:
+        Contenido de la plantilla como string
+    """
+    template_path = Path(__file__).parent / "templates" / "email" / template_name
+    try:
+        with open(template_path, 'r', encoding='utf-8') as f:
+            return f.read()
+    except FileNotFoundError:
+        evaluation_logger.log_error("Email Template", f"Plantilla no encontrada: {template_path}")
+        return ""
+    except Exception as e:
+        evaluation_logger.log_error("Email Template", f"Error cargando plantilla: {str(e)}")
+        return ""
+
+def render_email_template(template_name: str, **kwargs) -> str:
+    """
+    Carga y renderiza una plantilla de email con las variables proporcionadas
+    
+    Args:
+        template_name: Nombre del archivo de plantilla
+        **kwargs: Variables para reemplazar en la plantilla
+        
+    Returns:
+        Plantilla renderizada con las variables reemplazadas
+    """
+    template = load_email_template(template_name)
+    if not template:
+        return ""
+    
+    try:
+        return template.format(**kwargs)
+    except KeyError as e:
+        evaluation_logger.log_error("Email Template", f"Variable faltante en plantilla: {e}")
+        return template
+    except Exception as e:
+        evaluation_logger.log_error("Email Template", f"Error renderizando plantilla: {str(e)}")
+        return template
 
 def b64decode(s: str) -> str:
     """
@@ -639,9 +685,16 @@ async def evaluate_single_meet(request: SingleMeetRequest):
         start_time = datetime.now()
         
         # Crear y ejecutar crew de evaluación individual        
+        #COMENTADO PARA PROBAR CON DATOS MOCKEADOS
         crew = create_single_meet_evaluation_crew(meet_id)
         result = crew.kickoff()
         
+        #RECORDAR DESCOMENTAR LA LINEA QUE HACE EL FULL_RESULT = RESULT
+        print("Cargando datos mockados desde utils/data.json")
+        #result = json.load(open("utils/data.json", "r", encoding="utf-8"))
+        #print("result: ", result)
+        
+        #Descomentar para trackeo de tokens del crew
         # Registrar uso de tokens del crew
         tracker.add_crew_result(
             result=result,
@@ -661,7 +714,6 @@ async def evaluate_single_meet(request: SingleMeetRequest):
         
         # Extraer el contenido del resultado del crew
         result_str = str(result)
-        
         # Intentar extraer JSON del resultado si es un CrewOutput
         if hasattr(result, 'raw'):
             result_str = result.raw
@@ -669,7 +721,7 @@ async def evaluate_single_meet(request: SingleMeetRequest):
             result_str = result.content
         else:
             result_str = str(result)
-        
+            
         # Intentar parsear como JSON (puede venir en formato ```json ... ```)
         full_result = None
         try:
@@ -679,7 +731,9 @@ async def evaluate_single_meet(request: SingleMeetRequest):
                 full_result = json.loads(json_match.group(1))
             else:
                 # Intentar parsear directamente
-                full_result = json.loads(result_str)
+                #full_result = result
+                full_result = json.loads(result_str) #Descomentar para usar el resultado original
+                
         except (json.JSONDecodeError, AttributeError):
             # Si no es JSON válido, intentar extraer cualquier JSON del texto
             try:
@@ -712,6 +766,46 @@ async def evaluate_single_meet(request: SingleMeetRequest):
                 result_data["justification"] = match_eval.get("justification")
                 result_data["is_potential_match"] = match_eval.get("is_potential_match")
                 result_data["compatibility_score"] = match_eval.get("compatibility_score")
+        
+        # Guardar evaluación en la base de datos - MEET_EVALUATIONS
+        if isinstance(full_result, dict) and full_result:
+            try:
+                # Convertir full_result a JSON string para la función
+                full_result_json = json.dumps(full_result, ensure_ascii=False)
+                
+                # Acceder a la función subyacente del Tool
+                func_to_call = None
+                if hasattr(save_meet_evaluation, '__wrapped__'):
+                    func_to_call = save_meet_evaluation.__wrapped__
+                elif hasattr(save_meet_evaluation, 'func'):
+                    func_to_call = save_meet_evaluation.func
+                elif hasattr(save_meet_evaluation, '_func'):
+                    func_to_call = save_meet_evaluation._func
+                else:
+                    # Intentar llamar directamente
+                    func_to_call = save_meet_evaluation
+                
+                if func_to_call:
+                    save_result = func_to_call(full_result_json)
+                    save_result_data = json.loads(save_result) if isinstance(save_result, str) else save_result
+                    
+                    if save_result_data.get("success"):
+                        evaluation_id = save_result_data.get("evaluation_id")
+                        action = save_result_data.get("action", "created")
+                        evaluation_logger.log_task_complete("API", f"Evaluación guardada en meet_evaluation: {evaluation_id} (acción: {action})")
+                        print(f"✅ Evaluación guardada en meet_evaluation: {evaluation_id}")
+                    else:
+                        error_msg = save_result_data.get("error", "Error desconocido")
+                        evaluation_logger.log_error("API", f"Error guardando evaluación en meet_evaluation: {error_msg}")
+                        print(f"⚠️ Error guardando evaluación: {error_msg}")
+                else:
+                    evaluation_logger.log_error("API", "No se pudo acceder a la función subyacente de save_meet_evaluation")
+                    print("⚠️ No se pudo acceder a la función subyacente de save_meet_evaluation")
+            except Exception as save_error:
+                evaluation_logger.log_error("API", f"Error al guardar evaluación en meet_evaluation: {str(save_error)}")
+                print(f"⚠️ Error al guardar evaluación: {str(save_error)}")
+                import traceback
+                evaluation_logger.log_error("API", f"Traceback: {traceback.format_exc()}")
         
         # Si es un posible match, enviar email del cliente del JD interview
         email_sent = False
@@ -787,69 +881,36 @@ async def evaluate_single_meet(request: SingleMeetRequest):
                             # Crear asunto del email
                             subject = f"✅ Match Potencial - {interview_name} - Score: {result_data.get('compatibility_score', 0)}%"
                             
-                            # Crear cuerpo del email
-                            body = f"""
-Hola,
-
-Te informamos que hemos identificado un candidato potencial para la posición: **{interview_name}**
-
-📊 **RESULTADO DE LA EVALUACIÓN:**
-
-🎯 **Match Potencial:** ✅ SÍ
-📈 **Score de Compatibilidad:** {result_data.get('compatibility_score', 0)}%
-📋 **Recomendación Final:** {result_data.get('final_recommendation', 'N/A')}
-
----
-
-👤 **DATOS DEL CANDIDATO:**
-• Nombre: {candidate_data.get('name', 'N/A')}
-• Email: {candidate_data.get('email', 'N/A')}
-• Teléfono: {candidate_data.get('phone', 'N/A')}
-• Tech Stack: {candidate_data.get('tech_stack', 'N/A')}
-• CV URL: {candidate_data.get('cv_url', 'N/A')}
-
----
-
-💬 **ANÁLISIS DE CONVERSACIÓN:**
-
-**Habilidades Blandas:**
-{format_soft_skills(conversation_data.get('soft_skills', {}))}
-
-**Evaluación Técnica:**
-• Nivel de Conocimiento: {conversation_data.get('technical_assessment', {}).get('knowledge_level', 'N/A')}
-• Experiencia Práctica: {conversation_data.get('technical_assessment', {}).get('practical_experience', 'N/A')}
-
-**Preguntas Técnicas:**
-{format_technical_questions(conversation_data.get('technical_assessment', {}).get('technical_questions', []))}
-
----
-
-📝 **JUSTIFICACIÓN:**
-{result_data.get('justification', 'No disponible')}
-
----
-
-💬 **CONVERSACIÓN COMPLETA:**
-
-{conversation_text}
-
----
-
-🏢 **DATOS DEL CLIENTE:**
-• Cliente: {client_name}
-• Responsable: {client_responsible}
-• Teléfono: {client_phone}
-• Email: {client_email}
-
----
-
-🔍 **DETALLES ADICIONALES:**
-• Meet ID: {meet_id}
-• JD Interview ID: {jd_interviews_id}
-
-Saludos,
-Sistema de Evaluación de Candidatos
-                            """
+                            # Preparar datos para la plantilla
+                            tech_stack = candidate_data.get('tech_stack', [])
+                            tech_stack_str = ', '.join(tech_stack) if isinstance(tech_stack, list) else str(tech_stack)
+                            
+                            technical_assessment = conversation_data.get('technical_assessment', {})
+                            
+                            # Renderizar plantilla de email
+                            body = render_email_template(
+                                "evaluation_match.html",
+                                interview_name=interview_name,
+                                compatibility_score=result_data.get('compatibility_score', 0),
+                                final_recommendation=result_data.get('final_recommendation', 'N/A'),
+                                candidate_name=candidate_data.get('name', 'N/A'),
+                                candidate_email=candidate_data.get('email', 'N/A'),
+                                candidate_phone=candidate_data.get('phone', 'N/A'),
+                                candidate_tech_stack=tech_stack_str,
+                                candidate_cv_url=candidate_data.get('cv_url', 'N/A'),
+                                soft_skills_formatted=format_soft_skills(conversation_data.get('soft_skills', {})),
+                                knowledge_level=technical_assessment.get('knowledge_level', 'N/A'),
+                                practical_experience=technical_assessment.get('practical_experience', 'N/A'),
+                                technical_questions_formatted=format_technical_questions(technical_assessment.get('technical_questions', [])),
+                                justification=result_data.get('justification', 'No disponible'),
+                                conversation_text=conversation_text,
+                                client_name=client_name,
+                                client_responsible=client_responsible,
+                                client_phone=client_phone,
+                                client_email=client_email,
+                                meet_id=meet_id,
+                                jd_interviews_id=jd_interviews_id
+                            )
                             
                             # Enviar email
                             email_api_url = os.getenv("EMAIL_API_URL", "http://127.0.0.1:8004/send-simple-email")
@@ -860,12 +921,13 @@ Sistema de Evaluación de Candidatos
                                 "body": body
                             }
                             
-                            response = requests.post(
-                                email_api_url,
-                                json=payload,
-                                headers={'Content-Type': 'application/json'},
-                                timeout=30
-                            )
+                            #COMENTADO PARA PROBAR CON DATOS MOCKEADOS
+                            #response = requests.post(
+                            #     email_api_url,
+                            #     json=payload,
+                            #     headers={'Content-Type': 'application/json'},
+                            #     timeout=30
+                            # )
                             
                             response.raise_for_status()
                             email_sent = True

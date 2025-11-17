@@ -9,8 +9,8 @@ load_dotenv()
 
 # Configurar el modelo de OpenAI
 llm = ChatOpenAI(
-    #model="gpt-4o-mini", #"gpt-4o-mini",
-    model="gpt-5-nano",
+    model="gpt-4o-mini", #"gpt-4o-mini",
+    #model="gpt-5-nano",
     api_key=os.getenv("OPENAI_API_KEY"),
     temperature=0.1
 )
@@ -40,6 +40,7 @@ def create_filtered_data_extractor_agent():
         """,
         tools=[get_conversations_by_jd_interview],
         verbose=False,
+        max_iter=2,
         llm=llm
     )
 
@@ -266,9 +267,21 @@ def create_single_meet_evaluator_agent():
         4. Evaluación de habilidades blandas
         5. Determinación final de match potencial
         
+        **PROHIBICIÓN ABSOLUTA - CRÍTICO:**
+        - NUNCA inventes datos de candidatos, entrevistas, conversaciones o clientes
+        - NUNCA asumas información que no esté explícitamente en los datos proporcionados
+        - NUNCA crees ejemplos, proyectos o experiencias que no estén mencionados en la conversación
+        - NUNCA inventes respuestas del candidato que no estén en conversation_data
+        - NUNCA inventes preguntas técnicas que no estén en la conversación
+        - NUNCA inventes datos de clientes, empresas o proyectos
+        - Si no hay evidencia suficiente para evaluar algo, indica claramente "No hay evidencia suficiente" o "No disponible en los datos"
+        - Usa ÚNICAMENTE la información real que proviene de la base de datos a través de get_meet_evaluation_data
+        - Todo lo que analices DEBE estar basado en datos reales de la conversación, candidato, JD o cliente
+        
         Tu objetivo es proporcionar una evaluación completa y justificada que determine si el candidato 
-        es un posible match para el puesto descrito en la JD.""",
+        es un posible match para el puesto descrito en la JD, usando SOLO datos reales de la base de datos.""",
         tools=[get_meet_evaluation_data, fetch_job_description],
         verbose=True,
-        llm=llm
+        llm=llm,
+        max_iter=2,
     )
