@@ -1,0 +1,159 @@
+{
+    "meet_id": "92216552-58a4-4a0d-b4fd-846ad05da152",
+    "candidate": {
+      "id": "6adf20d0-6f8f-47bd-9e8c-3dda3152887f",
+      "name": "FRANCISCO SEMPÉ",
+      "email": "francisco.sempe@example.com",
+      "tech_stack": [
+        "Next.js",
+        "React.js",
+        "TypeScript",
+        "TailwindCSS",
+        "Redux Toolkit",
+        "React Query",
+        "Node.js",
+        "NestJS",
+        "Express.js",
+        "Python",
+        "FastAPI",
+        "Flask",
+        "PostgreSQL",
+        "MongoDB",
+        "DynamoDB",
+        "Supabase",
+        "AWS",
+        "EC2",
+        "S3",
+        "Lambda",
+        "API Gateway",
+        "Cognito",
+        "Docker",
+        "CI/CD",
+        "GitLab",
+        "GitHub Actions",
+        "OpenAI",
+        "LangChain",
+        "CrewAI",
+        "ElevenLabs",
+        "n8n",
+        "Power Automate"
+      ]
+    },
+    "jd_interview": {
+      "id": "ac99309c-e9c3-4c4a-acf2-7c7dce2e2b72",
+      "interview_name": "Interview - ReactJS-JD",
+      "job_description": "Responsabilidades-  Diseñar y desarrollar interfaces de usuario dinámicas y responsivas utilizando *ReactJS*. Implementar componentes reutilizables y optimizados en base a buenas prácticas. Integrar el frontend con APIs REST/GraphQL y manejar estado global (Redux, Context API, Zustand, etc.). Asegurar la performance, accesibilidad y escalabilidad de la aplicación. Colaborar con diseñadores, backend developers y QA para entregar productos de calidad. Participar en code reviews, testing unitario e implementación de mejores prácticas de desarrollo.Requisitos- Experiencia comprobable en *ReactJS* y *JavaScript (ES6+)*. Conocimiento de *HTML5, CSS3, TailwindCSS o Styled Components*. Manejo de hooks (useState, useEffect, useMemo, etc.). Experiencia en consumo de *APIs REST/GraphQL*. Conocimientos de control de versiones con *Git/GitHub/GitLab*. Comprensión de principios de responsive design y accesibilidad (WCAG).Deseables (nice to have) Experiencia con *Next.js* (SSR, SSG, routing avanzado). Familiaridad con *TypeScript*. Conocimiento en *testing (Jest, React Testing Library)*. Prácticas de CI/CD y metodologías ágiles (Scrum/Kanban)."
+    },
+    "conversation_analysis": {
+      "soft_skills": {
+        "communication": "Francisco se presentó de manera clara y concisa, explicando su experiencia y motivación para trabajar con ReactJS. Su respuesta fue directa y mostró confianza.",
+        "leadership": "Demostró iniciativa al proponer que, en caso de desacuerdo, escucharía a su compañero y luego buscaría la opinión de un líder, lo que indica una buena capacidad para manejar conflictos.",
+        "teamwork": "Mostró disposición para colaborar y escuchar a otros, lo que es esencial en un entorno de trabajo en equipo.",
+        "adaptability": "No se encontró evidencia suficiente en la conversación.",
+        "problem_solving": "Su enfoque para resolver desacuerdos sugiere un pensamiento crítico y la capacidad de buscar soluciones efectivas.",
+        "time_management": "No se encontró evidencia suficiente en la conversación.",
+        "emotional_intelligence": "Su disposición para escuchar a su compañero indica un nivel de empatía y autoconciencia.",
+        "continuous_learning": "No se encontró evidencia suficiente en la conversación."
+      },
+      "technical_assessment": {
+        "knowledge_level": "Avanzado",
+        "practical_experience": "Amplia",
+        "technical_questions": [
+          {
+            "question": "¿Qué es ReactJS y cuál es su principal ventaja?",
+            "answered": "SÍ",
+            "answer": "ReactJS es una librería creada por Facebook, que lo que veis es Meta. Su principal ventaja es que permite crear apps web rápidamente, reutilizando componentes y servicios.",
+            "evaluation": "La respuesta es correcta y demuestra un buen entendimiento de ReactJS y sus ventajas."
+          },
+          {
+            "question": "¿Cuál es la diferencia entre componentes de clase y componentes funcionales en React?",
+            "answered": "SÍ",
+            "answer": "Que los componentes de clase ya quedaron deprecados. Hoy se utilizan más los componentes funcionales y permite que se puedan reutilizar.",
+            "evaluation": "La respuesta es correcta, aunque podría haber profundizado más en las diferencias."
+          },
+          {
+            "question": "¿Puedes explicar el uso básico de los hooks useState y useEffect en React?",
+            "answered": "SÍ",
+            "answer": "Sí, el useState se utiliza para guardar el estado del componente, en este caso. Muchas veces lo utilizamos para guardar información, datos que se cargan en un formulario, por ejemplo. Y el useEffect es un hook que se utiliza para ejecutarse ni bien se renderiza el componente.",
+            "evaluation": "La respuesta es clara y muestra un buen entendimiento de los hooks."
+          },
+          {
+            "question": "¿Qué son las props y cómo se pasan entre componentes en React?",
+            "answered": "SÍ",
+            "answer": "Las props son como variables que se pasan de padre a hijo. Se utilizan muchas veces para pasar información, datos de la aplicación, como te digo, de padre a hijo.",
+            "evaluation": "La respuesta es correcta y demuestra un buen entendimiento del concepto de props."
+          },
+          {
+            "question": "¿Qué es el Virtual DOM y por qué React lo utiliza?",
+            "answered": "SÍ",
+            "answer": "Bueno, el Virtual DOM es una copia real del DOM y React lo utiliza para ejecutar los renderizados en tiempo de desarrollo, digamos.",
+            "evaluation": "La respuesta es correcta, aunque podría haber explicado más sobre su importancia en el rendimiento."
+          }
+        ],
+        "completeness_summary": {
+          "total_questions": 5,
+          "fully_answered": 5,
+          "partially_answered": 0,
+          "not_answered": 0
+        },
+        "alerts": [
+          
+        ]
+      }
+    },
+    "jd_analysis": {
+      "required_technologies": [
+        "ReactJS",
+        "JavaScript (ES6+)",
+        "HTML5",
+        "CSS3",
+        "TailwindCSS",
+        "APIs REST/GraphQL",
+        "Git/GitHub/GitLab"
+      ],
+      "experience_level_required": "Senior",
+      "soft_skills_required": [
+        "Comunicación",
+        "Trabajo en equipo",
+        "Resolución de problemas",
+        "Adaptabilidad"
+      ]
+    },
+    "match_evaluation": {
+      "is_potential_match": true,
+      "compatibility_score": 85,
+      "technical_match": {
+        "exact_matches": [
+          "ReactJS",
+          "JavaScript (ES6+)",
+          "HTML5",
+          "CSS3",
+          "TailwindCSS",
+          "APIs REST/GraphQL",
+          "Git/GitHub/GitLab"
+        ],
+        "partial_matches": [
+          
+        ],
+        "critical_gaps": [
+          
+        ],
+        "complementary_skills": [
+          "Next.js",
+          "TypeScript"
+        ]
+      },
+      "soft_skills_match": "Francisco mostró habilidades de comunicación y trabajo en equipo adecuadas, aunque hay áreas de mejora en adaptabilidad y aprendizaje continuo.",
+      "experience_match": "Su experiencia práctica es amplia y se alinea bien con los requisitos del puesto, aunque el nivel de seniority requerido es Senior y su experiencia parece ser más variada.",
+      "strengths": [
+        "Conocimiento sólido de ReactJS y sus conceptos fundamentales.",
+        "Habilidades de comunicación efectivas.",
+        "Capacidad para manejar conflictos en un entorno de trabajo."
+      ],
+      "concerns": [
+        "Falta de evidencia en adaptabilidad y aprendizaje continuo."
+      ],
+      "final_recommendation": "Recomendado",
+      "justification": "Francisco demostró un sólido conocimiento técnico en ReactJS y habilidades blandas adecuadas para el trabajo en equipo. Su experiencia se alinea bien con los requisitos del puesto, aunque hay áreas de mejora en adaptabilidad."
+    }
+  }

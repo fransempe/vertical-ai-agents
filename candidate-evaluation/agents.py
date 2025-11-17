@@ -8,8 +8,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Configurar el modelo de OpenAI
-FAST = ChatOpenAI(
-    model="gpt-5-nano", #"gpt-4o-mini",
+llm = ChatOpenAI(
+    model="gpt-4o-mini", #"gpt-4o-mini",
+    #model="gpt-5-nano",
     api_key=os.getenv("OPENAI_API_KEY"),
 )
 
@@ -47,14 +48,11 @@ def create_filtered_data_extractor_agent():
         Tu trabajo es obtener información específica de conversaciones filtradas por jd_interview_id,
         siguiendo el flujo: jd_interview -> meets -> conversations, asegurándote de incluir
         todos los datos relacionados al candidato, meets y jd_interview mediante joins correctos.
-
-        **PROHIBICIÓN ABSOLUTA:** NUNCA inventes datos de candidatos, entrevistas, conversaciones o clientes.
-        Solo debes extraer la información real filtrada desde la base de datos para que luego se generen reportes.
-        
-        **TL;DR:** Extrae solo lo necesario. Responde directo sin preámbulos.""",
+        """,
         tools=[get_conversations_by_jd_interview],
-        **common_agent_kwargs,
-        llm=FAST,
+        verbose=False,
+        max_iter=2,
+        llm=llm
     )
 
 def create_conversation_analyzer_agent():
@@ -64,14 +62,35 @@ def create_conversation_analyzer_agent():
         goal="Analizar conversaciones de candidatos evaluando habilidades blandas, técnicas y potencial de contratación",
         backstory="""Experto en análisis de conversaciones y evaluación de talento. Analizas la FORMA de responder (estructura, claridad, confianza) y el contenido técnico.
 
-        **CRÍTICO:** Identificar TODAS las preguntas técnicas del AI sobre la tecnología/stack. Para cada una: copiar texto exacto, verificar si fue contestada (SÍ/NO/PARCIALMENTE), copiar respuesta exacta, evaluar brevemente.
+        Tienes experiencia en:
+        - Psicología organizacional y evaluación de competencias
+        - Análisis de habilidades blandas (comunicación, liderazgo, trabajo en equipo, etc.)
+        - Evaluación técnica y profesional
+        - Identificación de fortalezas y áreas de mejora
+        - Predicción de desempeño laboral basada en patrones conversacionales
+        - Detección de red flags y señales positivas en candidatos
+
+        Tu enfoque es meticuloso, basado en evidencia, y siempre proporcionas evaluaciones balanceadas con justificaciones claras.
+        Entiendes que el campo conversation_data contiene la interacción entre el candidato (user) y el sistema de entrevista (AI),
+        donde el AI hace preguntas y el user responde.
+
+        **ENFOQUE PRINCIPAL:** Analizar la FORMA de responder del candidato, no solo el contenido.
+        Proporcionar comentarios detallados sobre cómo se expresa, estructura sus respuestas, demuestra confianza,
+        y maneja las preguntas. Incluir ejemplos específicos de la conversación y justificaciones fundamentadas.
         
-        **REGLAS:** Solo usar datos de BD. NO inventar información de candidatos, entrevistas, conversaciones ni clientes.
-        Si falta dato → "N/A". Comentarios breves (1-2 líneas). Ejemplos solo si relevantes.
-        
-        **TL;DR:** Análisis conciso. Bullet points. Sin repeticiones. Solo esencial.""",
-        **common_agent_kwargs,
-        llm=FAST,
+        **ANÁLISIS CRÍTICO TÉCNICO:** PROCESO OBLIGATORIO:
+        1. Leer cuidadosamente toda la conversación para identificar EXACTAMENTE las preguntas técnicas específicas
+        2. Extraer el texto completo de cada pregunta técnica realizada por el AI
+        3. Verificar que cada pregunta sea específicamente sobre la tecnología/stack del puesto (basado en job_description)
+        4. Para cada pregunta: copiar el texto exacto, verificar si fue contestada (SÍ/NO/PARCIALMENTE), copiar la respuesta exacta del candidato
+        5. Crear resumen detallado de completitud: [X/5 completamente contestadas, X/5 parcialmente, X/5 no contestadas]
+        6. Si hay preguntas sin contestar, generar ALERTA CRÍTICA especificando exactamente cuáles son
+        7. Evaluar la calidad técnica de cada respuesta y el nivel de conocimiento en la tecnología específica demostrado.
+
+        Tu objetivo es proporcionar evaluaciones exhaustivas y cualitativas que ayuden a tomar decisiones de contratación informadas y justas.""",
+        verbose=False,
+        max_iter=2,
+        llm=llm
     )
 
 def create_job_description_analyzer_agent():
@@ -286,14 +305,21 @@ def create_single_meet_evaluator_agent():
         4. Evaluación de habilidades blandas
         5. Determinación final de match potencial
         
+        **PROHIBICIÓN ABSOLUTA - CRÍTICO:**
+        - NUNCA inventes datos de candidatos, entrevistas, conversaciones o clientes
+        - NUNCA asumas información que no esté explícitamente en los datos proporcionados
+        - NUNCA crees ejemplos, proyectos o experiencias que no estén mencionados en la conversación
+        - NUNCA inventes respuestas del candidato que no estén en conversation_data
+        - NUNCA inventes preguntas técnicas que no estén en la conversación
+        - NUNCA inventes datos de clientes, empresas o proyectos
+        - Si no hay evidencia suficiente para evaluar algo, indica claramente "No hay evidencia suficiente" o "No disponible en los datos"
+        - Usa ÚNICAMENTE la información real que proviene de la base de datos a través de get_meet_evaluation_data
+        - Todo lo que analices DEBE estar basado en datos reales de la conversación, candidato, JD o cliente
+        
         Tu objetivo es proporcionar una evaluación completa y justificada que determine si el candidato 
-        es un posible match para el puesto descrito en la JD.
-        
-        **PROHIBICIÓN ABSOLUTA:** NUNCA inventes datos de candidatos, entrevistas, conversaciones o clientes.
-        Basate únicamente en la información real proveniente de la base de datos para elaborar la evaluación.
-        
-        **TL;DR:** Evalúa conciso. Solo conclusiones clave y justificación breve. Sin explicaciones largas.""",
+        es un posible match para el puesto descrito en la JD, usando SOLO datos reales de la base de datos.""",
         tools=[get_meet_evaluation_data, fetch_job_description],
-        **common_agent_kwargs,  
-        llm=FAST,
+        verbose=True,
+        llm=llm,
+        max_iter=2,
     )

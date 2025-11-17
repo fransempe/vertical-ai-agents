@@ -185,10 +185,7 @@ def send_evaluation_email(
     Args:
         subject: Asunto del email
         body: Cuerpo del email con los resultados
-        to_email: Email del destinatario (opcional; si no se proporciona se obtiene desde la BD)
-        jd_interview_id: (Opcional) ID de jd_interview para obtener el email del cliente
-        evaluation_id: (Opcional) ID de interview_evaluations para obtener el email del cliente
-        
+        jd_interview_id: ID del jd_interview asociado al análisis
     Returns:
         JSON string con el resultado del envío
     """
@@ -204,10 +201,18 @@ def send_evaluation_email(
         evaluation_logger.log_task_progress("Envío de Email", f"Preparando email: {subject}")
         
         email_api_url = os.getenv("EMAIL_API_URL", "http://127.0.0.1:8004/send-simple-email")
-        print(f"📧 [send_evaluation_email] Email API URL: {email_api_url}")
         
-
-        # Si no se proporciona to_email, intentar detectarlo (solo como último recurso)
+        # Detectar destinatario dinámicamente desde el cuerpo del reporte si hay algún email
+        to_email = os.getenv("REPORT_TO_EMAIL", "")
+        try:
+            import re as _re
+            # Buscar el primer email en el cuerpo
+            email_match = _re.search(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", body or "")
+            if not to_email and email_match:
+                to_email = email_match.group(0)
+        except Exception:
+            pass
+        # Fallback final si no se detecta ninguno
         if not to_email:
             print(f"📧 [send_evaluation_email] ⚠️ No se proporcionó to_email, intentando detectarlo...")
             to_email = os.getenv("REPORT_TO_EMAIL", "")
@@ -386,6 +391,7 @@ def get_all_jd_interviews() -> str:
                 "interview_name": row.get('interview_name'),
                 "agent_id": row.get('agent_id'),
                 "job_description": row.get('job_description'),
+                "client_id": row.get('client_id'),
                 "created_at": row.get('created_at')
             }
             interviews.append(interview)
@@ -457,7 +463,7 @@ def get_jd_interviews_data(jd_interview_id: str = None) -> str:
                 "id": row.get('id'),
                 "interview_name": row.get('interview_name'),
                 "agent_id": row.get('agent_id'),
-                "job_description": job_desc,  # Truncado si es muy largo
+                "job_description": row.get('job_description'),
                 "client_id": row.get('client_id'),
                 "created_at": row.get('created_at')
             }
@@ -547,17 +553,20 @@ def get_conversations_by_jd_interview(jd_interview_id: str, limit: int = 100) ->
         jd_interview = jd_interview_response.data[0]
         evaluation_logger.log_task_progress("Obtener Conversaciones por JD Interview", f"JD Interview encontrado: {jd_interview.get('interview_name', 'N/A')}")
         
-        # 2. Buscar conversaciones que tengan jd_interviews_id = jd_interview_id
-        conversations_response = supabase.table('conversations').select(
-            '''
-            id,
-            meet_id,
-            jd_interviews_id,
-            candidate_id,
-            conversation_data,
-            candidates(id, name, email, phone, cv_url, tech_stack)
-            '''
-        ).eq('jd_interviews_id', jd_interview_id).limit(limit).execute()
+        # 1.5. Obtener datos del cliente usando client_id del jd_interview
+        client_id = jd_interview.get('client_id')
+        client_data = None
+        if client_id:
+            try:
+                client_response = supabase.table('clients').select('id, name, email, responsible').eq('id', client_id).limit(1).execute()
+                if client_response.data and len(client_response.data) > 0:
+                    client_data = client_response.data[0]
+                    evaluation_logger.log_task_progress("Obtener Conversaciones por JD Interview", f"Cliente encontrado: {client_data.get('name', 'N/A')}")
+            except Exception as client_error:
+                evaluation_logger.log_error("Obtener Conversaciones por JD Interview", f"Error obteniendo datos del cliente: {str(client_error)}")
+        
+        # 2. Buscar meets que tengan jd_interviews_id = jd_interview_id
+        meets_response = supabase.table('meets').select('*').eq('jd_interviews_id', jd_interview_id).execute()
         
         conversations = []
         for row in conversations_response.data or []:
@@ -577,9 +586,46 @@ def get_conversations_by_jd_interview(jd_interview_id: str, limit: int = 100) ->
                 },
                 "jd_interview_id": jd_interview_id,
                 "jd_interview_name": jd_interview.get('interview_name'),
-                "jd_interview_agent_id": jd_interview.get('agent_id')
-            }
-            conversations.append(conversation)
+                "jd_interview_agent_id": jd_interview.get('agent_id'),
+                "client": client_data,
+                "conversations": [],
+                "total_conversations": 0
+            }, indent=2, ensure_ascii=False)
+        
+        meet_ids = [meet['id'] for meet in meets_response.data]
+        evaluation_logger.log_task_progress("Obtener Conversaciones por JD Interview", f"Encontrados {len(meet_ids)} meets")
+        
+        # 3. Obtener conversaciones de esos meets
+        conversations = []
+        for meet_id in meet_ids:
+            conversations_response = supabase.table('conversations').select(
+                '''
+                meet_id,
+                candidate_id,
+                conversation_data,
+                candidates(id, name, email, phone, cv_url, tech_stack)
+                '''
+            ).eq('meet_id', meet_id).limit(limit).execute()
+            
+            for row in conversations_response.data:
+                conversation = {
+                    "meet_id": row['meet_id'],
+                    "candidate_id": row['candidate_id'],
+                    "conversation_data": row['conversation_data'],
+                    "candidate": {
+                        "id": row['candidates']['id'] if row['candidates'] else None,
+                        "name": row['candidates']['name'] if row['candidates'] else None,
+                        "email": row['candidates']['email'] if row['candidates'] else None,
+                        "phone": row['candidates']['phone'] if row['candidates'] else None,
+                        "cv_url": row['candidates']['cv_url'] if row['candidates'] else None,
+                        "tech_stack": row['candidates']['tech_stack'] if row['candidates'] else None
+                    },
+                    "jd_interview_id": jd_interview_id,
+                    "jd_interview_name": jd_interview.get('interview_name'),
+                    "jd_interview_agent_id": jd_interview.get('agent_id'),
+                    "client": client_data
+                }
+                conversations.append(conversation)
         
         # Si no se encontraron conversaciones, devolver mensaje informativo
         if not conversations:
@@ -589,12 +635,15 @@ def get_conversations_by_jd_interview(jd_interview_id: str, limit: int = 100) ->
                 "jd_interview_id": jd_interview_id,
                 "jd_interview_name": jd_interview.get('interview_name'),
                 "jd_interview_agent_id": jd_interview.get('agent_id'),
+                "client": client_data,
                 "conversations": [],
                 "total_conversations": 0
-            }, indent=2)
+            }, indent=2, ensure_ascii=False)
+            
+        print("conversations: ", conversations)
         
         evaluation_logger.log_task_complete("Obtener Conversaciones por JD Interview", f"{len(conversations)} conversaciones filtradas obtenidas")
-        return json.dumps(conversations, indent=2)
+        return json.dumps(conversations, indent=2, ensure_ascii=False)
         
     except Exception as e:
         evaluation_logger.log_error("Obtener Conversaciones por JD Interview", f"Error obteniendo conversaciones filtradas: {str(e)}")
@@ -623,7 +672,7 @@ def get_meet_evaluation_data(meet_id: str) -> str:
         meet_response = supabase.table('meets').select(
             '''
             *,
-            jd_interviews(id, interview_name, agent_id, job_description, created_at)
+            jd_interviews(id, interview_name, agent_id, job_description, client_id, created_at)
             '''
         ).eq('id', meet_id).execute()
         
@@ -643,6 +692,17 @@ def get_meet_evaluation_data(meet_id: str) -> str:
             '''
         ).eq('meet_id', meet_id).execute()
         
+        client_response = supabase.table('clients').select('*').eq('id', meet.get('jd_interviews').get('client_id')).execute()
+        print("client_id: ", meet.get('jd_interviews').get('client_id'))
+        print("client: ", client_response.data)
+        
+        client_data = None
+        if client_response.data and len(client_response.data) > 0:
+            client_data = client_response.data[0]
+            os.environ["REPORT_TO_EMAIL"] = client_data.get('email')
+        else:
+            os.environ["REPORT_TO_EMAIL"] = "flocklab.id@gmail.com"
+        
         conversation = None
         if conversation_response.data and len(conversation_response.data) > 0:
             row = conversation_response.data[0]
@@ -657,7 +717,8 @@ def get_meet_evaluation_data(meet_id: str) -> str:
                     "phone": row['candidates']['phone'] if row['candidates'] else None,
                     "cv_url": row['candidates']['cv_url'] if row['candidates'] else None,
                     "tech_stack": row['candidates']['tech_stack'] if row['candidates'] else None
-                }
+                },
+                "client": client_data
             }
         
         # 3. Obtener JD interview
@@ -672,29 +733,34 @@ def get_meet_evaluation_data(meet_id: str) -> str:
                 "updated_at": meet.get('updated_at')
             },
             "conversation": conversation,
-            "jd_interview": jd_interview
+            "jd_interview": jd_interview,
+            "client": client_data
         }
         
+        #print("resultado de meet completa: ", result)
+        
         evaluation_logger.log_task_complete("Obtener Datos de Meet", f"Datos obtenidos exitosamente para meet: {meet_id}")
-        return json.dumps(result, indent=2)
+        return json.dumps(result, indent=2, ensure_ascii=False)
         
     except Exception as e:
         evaluation_logger.log_error("Obtener Datos de Meet", f"Error obteniendo datos: {str(e)}")
         return json.dumps({"error": f"Error obteniendo datos: {str(e)}"}, indent=2)
 
 @tool
-def get_client_email(client_id: str) -> str:
+def save_meet_evaluation(full_result: str) -> str:
     """
-    Obtiene el email del cliente desde la tabla clients usando client_id.
+    Guarda la evaluación de un meet en la tabla meet_evaluation.
     
     Args:
-        client_id: ID del cliente
+        full_result: JSON string o dict con la evaluación completa del meet.
+                     Debe contener: meet_id, candidate.id, jd_interview.id, 
+                     conversation_analysis, match_evaluation, etc.
         
     Returns:
-        JSON string con el email del cliente o error
+        JSON string con el resultado de la operación (success, evaluation_id o error)
     """
     try:
-        evaluation_logger.log_task_start("Obtener Email de Cliente", f"Obteniendo email para client_id: {client_id}")
+        evaluation_logger.log_task_start("Guardar Meet Evaluation", "Preparando guardado de evaluación de meet")
         
         url = os.getenv("SUPABASE_URL")
         key = os.getenv("SUPABASE_KEY")
@@ -706,31 +772,144 @@ def get_client_email(client_id: str) -> str:
         
         supabase = create_client(url, key)
         
-        # Obtener cliente por client_id
-        response = supabase.table('clients').select('email, name').eq('id', client_id).limit(1).execute()
+        # Parsear full_result si viene como string
+        if isinstance(full_result, str):
+            try:
+                result_data = json.loads(full_result)
+            except json.JSONDecodeError:
+                evaluation_logger.log_error("Guardar Meet Evaluation", "Error parseando full_result como JSON")
+                return json.dumps({
+                    "success": False,
+                    "error": "Error parseando full_result como JSON"
+                }, indent=2, ensure_ascii=False)
+        elif isinstance(full_result, dict):
+            result_data = full_result
+        else:
+            evaluation_logger.log_error("Guardar Meet Evaluation", f"full_result debe ser string o dict, recibido: {type(full_result)}")
+            return json.dumps({
+                "success": False,
+                "error": f"full_result debe ser string o dict, recibido: {type(full_result)}"
+            }, indent=2, ensure_ascii=False)
         
-        if not response.data:
-            evaluation_logger.log_error("Obtener Email de Cliente", f"No se encontró cliente con ID: {client_id}")
-            return json.dumps({"error": f"No se encontró cliente con ID: {client_id}"}, indent=2)
+        # Extraer datos necesarios
+        meet_id = result_data.get('meet_id')
+        candidate_id = result_data.get('candidate', {}).get('id')
+        jd_interview_id = result_data.get('jd_interview', {}).get('id')
+        conversation_analysis = result_data.get('conversation_analysis', {})
+        match_evaluation = result_data.get('match_evaluation', {})
         
-        client = response.data[0]
-        client_email = client.get('email')
-        client_name = client.get('name', 'N/A')
+        # Validar campos requeridos
+        if not meet_id:
+            evaluation_logger.log_error("Guardar Meet Evaluation", "meet_id no encontrado en full_result")
+            return json.dumps({
+                "success": False,
+                "error": "meet_id es requerido"
+            }, indent=2, ensure_ascii=False)
         
-        if not client_email:
-            evaluation_logger.log_error("Obtener Email de Cliente", f"Cliente {client_id} no tiene email configurado")
-            return json.dumps({"error": f"Cliente {client_id} no tiene email configurado"}, indent=2)
+        if not candidate_id:
+            evaluation_logger.log_error("Guardar Meet Evaluation", "candidate.id no encontrado en full_result")
+            return json.dumps({
+                "success": False,
+                "error": "candidate.id es requerido"
+            }, indent=2, ensure_ascii=False)
         
-        evaluation_logger.log_task_complete("Obtener Email de Cliente", f"Email obtenido: {client_email} (Cliente: {client_name})")
-        return json.dumps({
-            "email": client_email,
-            "name": client_name,
-            "client_id": client_id
-        }, indent=2)
+        if not jd_interview_id:
+            evaluation_logger.log_error("Guardar Meet Evaluation", "jd_interview.id no encontrado en full_result")
+            return json.dumps({
+                "success": False,
+                "error": "jd_interview.id es requerido"
+            }, indent=2, ensure_ascii=False)
+        
+        # Extraer technical_assessment, completeness_summary y alerts
+        technical_assessment_data = conversation_analysis.get('technical_assessment', {})
+        
+        # technical_assessment sin completeness_summary y alerts
+        technical_assessment = {
+            "knowledge_level": technical_assessment_data.get('knowledge_level'),
+            "practical_experience": technical_assessment_data.get('practical_experience'),
+            "technical_questions": technical_assessment_data.get('technical_questions', [])
+        }
+        
+        # completeness_summary
+        completeness_summary = technical_assessment_data.get('completeness_summary', {})
+        
+        # alerts
+        alerts = technical_assessment_data.get('alerts', [])
+        
+        # Preparar datos para insertar
+        now = datetime.now().isoformat()
+        
+        evaluation_data = {
+            "meet_id": meet_id,
+            "candidate_id": candidate_id,
+            "jd_interview_id": jd_interview_id,
+            "conversation_analysis": conversation_analysis,  # JSONB completo
+            "technical_assessment": technical_assessment,  # JSONB sin completeness_summary y alerts
+            "completeness_summary": completeness_summary,  # JSONB
+            "alerts": alerts,  # Array
+            "match_evaluation": match_evaluation,  # JSONB completo
+            "created_at": now,
+            "updated_at": now
+        }
+        
+        evaluation_logger.log_task_progress("Guardar Meet Evaluation", f"Insertando evaluación para meet_id: {meet_id}")
+        
+        # Verificar si ya existe una evaluación para este meet_id
+        existing = supabase.table('meet_evaluations').select('id').eq('meet_id', meet_id).execute()
+        
+        if existing.data and len(existing.data) > 0:
+            # Actualizar registro existente
+            evaluation_id = existing.data[0]['id']
+            evaluation_logger.log_task_progress("Guardar Meet Evaluation", f"Actualizando evaluación existente: {evaluation_id}")
+            
+            # Remover created_at para no actualizarlo
+            update_data = {k: v for k, v in evaluation_data.items() if k != 'created_at'}
+            
+            response = supabase.table('meet_evaluations').update(update_data).eq('id', evaluation_id).execute()
+            
+            if response.data:
+                evaluation_logger.log_task_complete("Guardar Meet Evaluation", f"Evaluación actualizada exitosamente: {evaluation_id}")
+                return json.dumps({
+                    "success": True,
+                    "evaluation_id": evaluation_id,
+                    "message": "Evaluación actualizada exitosamente",
+                    "action": "updated"
+                }, indent=2, ensure_ascii=False)
+            else:
+                evaluation_logger.log_error("Guardar Meet Evaluation", "Error actualizando evaluación")
+                return json.dumps({
+                    "success": False,
+                    "error": "Error actualizando evaluación en la base de datos"
+                }, indent=2, ensure_ascii=False)
+        else:
+            # Insertar nuevo registro
+            response = supabase.table('meet_evaluations').insert(evaluation_data).execute()
+            
+            if response.data and len(response.data) > 0:
+                evaluation_id = response.data[0].get('id')
+                evaluation_logger.log_task_complete("Guardar Meet Evaluation", f"Evaluación guardada exitosamente: {evaluation_id}")
+                return json.dumps({
+                    "success": True,
+                    "evaluation_id": evaluation_id,
+                    "message": "Evaluación guardada exitosamente",
+                    "action": "created"
+                }, indent=2, ensure_ascii=False)
+            else:
+                evaluation_logger.log_error("Guardar Meet Evaluation", "Error insertando evaluación - respuesta vacía")
+                return json.dumps({
+                    "success": False,
+                    "error": "Error insertando evaluación en la base de datos"
+                }, indent=2, ensure_ascii=False)
         
     except Exception as e:
-        evaluation_logger.log_error("Obtener Email de Cliente", f"Error obteniendo email: {str(e)}")
-        return json.dumps({"error": f"Error obteniendo email del cliente: {str(e)}"}, indent=2)
+        evaluation_logger.log_error("Guardar Meet Evaluation", f"Error guardando evaluación: {str(e)}")
+        import traceback
+        evaluation_logger.log_error("Guardar Meet Evaluation", f"Traceback: {traceback.format_exc()}")
+        return json.dumps({
+            "success": False,
+            "error": f"Error guardando evaluación: {str(e)}"
+        }, indent=2, ensure_ascii=False)
+
 
 @tool
 def get_candidates_data(limit: int = 100) -> str:

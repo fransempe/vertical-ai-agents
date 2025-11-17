@@ -1,0 +1,14 @@
+{
+  "run_id": "SingleMeetEvaluationCrew_20251113_124734_039829",
+  "crew_name": "SingleMeetEvaluationCrew",
+  "start_time": "2025-11-13T12:47:34.039829",
+  "meta": {
+    "meet_id": "92216552-58a4-4a0d-b4fd-846ad05da152"
+  },
+  "steps": [],
+  "total_tokens": 0,
+  "total_prompt_tokens": 0,
+  "total_completion_tokens": 0,
+  "end_time": "2025-11-13T12:49:23.230490",
+  "duration_seconds": 109.190661
+}

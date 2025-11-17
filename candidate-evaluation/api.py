@@ -8,7 +8,9 @@ import json
 import base64
 import re
 import requests
+import tiktoken
 from datetime import datetime
+from pathlib import Path
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Request, BackgroundTasks, Response
 import httpx
@@ -20,7 +22,11 @@ from filtered_crew import create_filtered_data_processing_crew
 from single_meet_crew import create_single_meet_evaluation_crew
 from utils.logger import evaluation_logger
 from supabase import create_client
-from uuid import UUID
+from tracking import TokenTracker
+from tools.token_estimator import estimate_cost, estimate_task_tokens, estimate_completion_tokens, breakdown_context_tokens
+from tools.supabase_tools import get_meet_evaluation_data, save_meet_evaluation
+from agents import create_single_meet_evaluator_agent
+from tasks import create_single_meet_extraction_task, create_single_meet_evaluation_task
 
 
 GRAPH_TENANT_ID = os.getenv("GRAPH_TENANT_ID", "")
@@ -136,6 +142,51 @@ def format_technical_questions(questions: list) -> str:
     
     return "\n".join(formatted) if formatted else "No disponible"
 
+def load_email_template(template_name: str) -> str:
+    """
+    Carga una plantilla de email desde el directorio templates/email
+    
+    Args:
+        template_name: Nombre del archivo de plantilla (ej: 'evaluation_match.html')
+        
+    Returns:
+        Contenido de la plantilla como string
+    """
+    template_path = Path(__file__).parent / "templates" / "email" / template_name
+    try:
+        with open(template_path, 'r', encoding='utf-8') as f:
+            return f.read()
+    except FileNotFoundError:
+        evaluation_logger.log_error("Email Template", f"Plantilla no encontrada: {template_path}")
+        return ""
+    except Exception as e:
+        evaluation_logger.log_error("Email Template", f"Error cargando plantilla: {str(e)}")
+        return ""
+
+def render_email_template(template_name: str, **kwargs) -> str:
+    """
+    Carga y renderiza una plantilla de email con las variables proporcionadas
+    
+    Args:
+        template_name: Nombre del archivo de plantilla
+        **kwargs: Variables para reemplazar en la plantilla
+        
+    Returns:
+        Plantilla renderizada con las variables reemplazadas
+    """
+    template = load_email_template(template_name)
+    if not template:
+        return ""
+    
+    try:
+        return template.format(**kwargs)
+    except KeyError as e:
+        evaluation_logger.log_error("Email Template", f"Variable faltante en plantilla: {e}")
+        return template
+    except Exception as e:
+        evaluation_logger.log_error("Email Template", f"Error renderizando plantilla: {str(e)}")
+        return template
+
 def b64decode(s: str) -> str:
     """
     Decodifica string Base64 con padding tolerante
@@ -230,13 +281,8 @@ async def trigger_analysis(request: AnalysisRequest = None):
         # Preparar variables de evaluación (se insertará al final)
         evaluation_id = None
         client_id = None
-        
-        result = None
-
-        client_email = None
-        previous_report_email = os.environ.get("REPORT_TO_EMAIL")
-        email_override_set = False
-
+                        
+        # Crear y ejecutar crew (filtrado o completo)
         if jd_interview_id:
             try:
                 supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
@@ -274,51 +320,15 @@ async def trigger_analysis(request: AnalysisRequest = None):
             else:
                 crew = create_data_processing_crew()
 
-            # Ejecutar el crew y obtener resultado
-            result = crew.kickoff()
-            
-            # Calcular tiempo de ejecución
-            end_time = datetime.now()
-            execution_time = str(end_time - start_time)
-            
-            evaluation_logger.log_task_complete("API", f"Proceso completado en {execution_time}")
-            
-            try:
-                # Si es un CrewOutput, extraer su contenido
-                if hasattr(result, 'raw'):
-                    try:
-                        # Intentar parsear el raw como JSON
-                        result_dict = json.loads(result.raw)
-                    except json.JSONDecodeError:
-                        # Si no es JSON válido, crear un dict con el contenido raw
-                        result_dict = {"raw_result": result.raw}
-                else:
-                    # Si no es CrewOutput, intentar convertir a dict
-                    try:
-                        result_dict = json.loads(str(result))
-                    except json.JSONDecodeError:
-                        result_dict = {"raw_result": str(result)}
-            except Exception:
-                # Fallback en caso de cualquier error
-                result_dict = {"raw_result": str(result)}
-    
-            return AnalysisResponse(
-                status="success",
-                message="Análisis completado exitosamente",
-                timestamp=start_time.strftime('%Y-%m-%d %H:%M:%S'),
-                execution_time=execution_time,
-                results_file=None,
-                result=result_dict,
-                jd_interview_id=jd_interview_id,
-                evaluation_id=None,
-            )
-        finally:
-            if email_override_set:
-                if previous_report_email is None:
-                    os.environ.pop("REPORT_TO_EMAIL", None)
-                else:
-                    os.environ["REPORT_TO_EMAIL"] = previous_report_email
-                evaluation_logger.log_task_progress("API", "Email del cliente restaurado al valor previo en REPORT_TO_EMAIL")
+        return AnalysisResponse(
+            status="success",
+            message="Análisis completado exitosamente",
+            timestamp=start_time.strftime('%Y-%m-%d %H:%M:%S'),
+            execution_time=execution_time,
+            results_file=filename,
+            result=result_dict,
+            jd_interview_id=jd_interview_id
+        )
         
     except Exception as e:
         evaluation_logger.log_error("API", f"Error en análisis: {str(e)}")
@@ -582,11 +592,13 @@ async def outlook_webhook(request: Request):
     validation_token = request.query_params.get("validationToken")
     if validation_token:
         print("✅ Webhook validado por Microsoft")
+        return Response(content=validation_token, status_code=200)
         # Nota: se quita el return para permitir continuar con el flujo
     
     # Notificación real de email
     try:
         data = await request.json()
+        print("data: ", data)
         _events = len(data.get('value', [])) if isinstance(data, dict) else 0
         print(f"📧 Notificación recibida - {_events} evento(s)")
         
@@ -670,13 +682,23 @@ async def evaluate_single_meet(request: SingleMeetRequest):
     Args:
         request: Objeto con meet_id del meet a evaluar
     """
+    tracker = None
     try:
         meet_id = request.meet_id
         evaluation_logger.log_task_start("API", f"Iniciando evaluación de meet: {meet_id}")
         
+        # Inicializar tracker de tokens
+        tracker = TokenTracker(log_dir="logs/token_tracking")
+        run_id = tracker.start_run(
+            crew_name="SingleMeetEvaluationCrew",
+            meta={"meet_id": meet_id}
+        )
+        print(f"▶ RunID: {run_id}")
+        
         start_time = datetime.now()
         
-        # Crear y ejecutar crew de evaluación individual
+        # Crear y ejecutar crew de evaluación individual        
+        #COMENTADO PARA PROBAR CON DATOS MOCKEADOS
         crew = create_single_meet_evaluation_crew(meet_id)
         
         print("=" * 80)
@@ -685,6 +707,24 @@ async def evaluate_single_meet(request: SingleMeetRequest):
         
         result = crew.kickoff()
         
+        #RECORDAR DESCOMENTAR LA LINEA QUE HACE EL FULL_RESULT = RESULT
+        print("Cargando datos mockados desde utils/data.json")
+        #result = json.load(open("utils/data.json", "r", encoding="utf-8"))
+        #print("result: ", result)
+        
+        #Descomentar para trackeo de tokens del crew
+        # Registrar uso de tokens del crew
+        tracker.add_crew_result(
+            result=result,
+            step_name="crew.kickoff",
+            agent=None,
+            task=None,
+            extra={
+                "usage_metrics": getattr(crew, "usage_metrics", None),
+                "result_meta": getattr(result, "raw", None) and {"has_raw": True}
+            }
+        )
+        
         end_time = datetime.now()
         execution_time = end_time - start_time
         
@@ -692,7 +732,6 @@ async def evaluate_single_meet(request: SingleMeetRequest):
         
         # Extraer el contenido del resultado del crew
         result_str = str(result)
-        
         # Intentar extraer JSON del resultado si es un CrewOutput
         if hasattr(result, 'raw'):
             result_str = result.raw
@@ -700,7 +739,7 @@ async def evaluate_single_meet(request: SingleMeetRequest):
             result_str = result.content
         else:
             result_str = str(result)
-        
+            
         # Intentar parsear como JSON (puede venir en formato ```json ... ```)
         full_result = None
         try:
@@ -710,7 +749,9 @@ async def evaluate_single_meet(request: SingleMeetRequest):
                 full_result = json.loads(json_match.group(1))
             else:
                 # Intentar parsear directamente
-                full_result = json.loads(result_str)
+                #full_result = result
+                full_result = json.loads(result_str) #Descomentar para usar el resultado original
+                
         except (json.JSONDecodeError, AttributeError):
             # Si no es JSON válido, intentar extraer cualquier JSON del texto
             try:
@@ -744,7 +785,47 @@ async def evaluate_single_meet(request: SingleMeetRequest):
                 result_data["is_potential_match"] = match_eval.get("is_potential_match")
                 result_data["compatibility_score"] = match_eval.get("compatibility_score")
         
-        # Si es un posible match, enviar email al cliente del JD interview
+        # Guardar evaluación en la base de datos - MEET_EVALUATIONS
+        if isinstance(full_result, dict) and full_result:
+            try:
+                # Convertir full_result a JSON string para la función
+                full_result_json = json.dumps(full_result, ensure_ascii=False)
+                
+                # Acceder a la función subyacente del Tool
+                func_to_call = None
+                if hasattr(save_meet_evaluation, '__wrapped__'):
+                    func_to_call = save_meet_evaluation.__wrapped__
+                elif hasattr(save_meet_evaluation, 'func'):
+                    func_to_call = save_meet_evaluation.func
+                elif hasattr(save_meet_evaluation, '_func'):
+                    func_to_call = save_meet_evaluation._func
+                else:
+                    # Intentar llamar directamente
+                    func_to_call = save_meet_evaluation
+                
+                if func_to_call:
+                    save_result = func_to_call(full_result_json)
+                    save_result_data = json.loads(save_result) if isinstance(save_result, str) else save_result
+                    
+                    if save_result_data.get("success"):
+                        evaluation_id = save_result_data.get("evaluation_id")
+                        action = save_result_data.get("action", "created")
+                        evaluation_logger.log_task_complete("API", f"Evaluación guardada en meet_evaluation: {evaluation_id} (acción: {action})")
+                        print(f"✅ Evaluación guardada en meet_evaluation: {evaluation_id}")
+                    else:
+                        error_msg = save_result_data.get("error", "Error desconocido")
+                        evaluation_logger.log_error("API", f"Error guardando evaluación en meet_evaluation: {error_msg}")
+                        print(f"⚠️ Error guardando evaluación: {error_msg}")
+                else:
+                    evaluation_logger.log_error("API", "No se pudo acceder a la función subyacente de save_meet_evaluation")
+                    print("⚠️ No se pudo acceder a la función subyacente de save_meet_evaluation")
+            except Exception as save_error:
+                evaluation_logger.log_error("API", f"Error al guardar evaluación en meet_evaluation: {str(save_error)}")
+                print(f"⚠️ Error al guardar evaluación: {str(save_error)}")
+                import traceback
+                evaluation_logger.log_error("API", f"Traceback: {traceback.format_exc()}")
+        
+        # Si es un posible match, enviar email del cliente del JD interview
         email_sent = False
         if result_data.get("is_potential_match") is True:
             try:
@@ -818,69 +899,36 @@ async def evaluate_single_meet(request: SingleMeetRequest):
                             # Crear asunto del email
                             subject = f"✅ Match Potencial - {interview_name} - Score: {result_data.get('compatibility_score', 0)}%"
                             
-                            # Crear cuerpo del email
-                            body = f"""
-Hola,
-
-Te informamos que hemos identificado un candidato potencial para la posición: **{interview_name}**
-
-📊 **RESULTADO DE LA EVALUACIÓN:**
-
-🎯 **Match Potencial:** ✅ SÍ
-📈 **Score de Compatibilidad:** {result_data.get('compatibility_score', 0)}%
-📋 **Recomendación Final:** {result_data.get('final_recommendation', 'N/A')}
-
----
-
-👤 **DATOS DEL CANDIDATO:**
-• Nombre: {candidate_data.get('name', 'N/A')}
-• Email: {candidate_data.get('email', 'N/A')}
-• Teléfono: {candidate_data.get('phone', 'N/A')}
-• Tech Stack: {candidate_data.get('tech_stack', 'N/A')}
-• CV URL: {candidate_data.get('cv_url', 'N/A')}
-
----
-
-💬 **ANÁLISIS DE CONVERSACIÓN:**
-
-**Habilidades Blandas:**
-{format_soft_skills(conversation_data.get('soft_skills', {}))}
-
-**Evaluación Técnica:**
-• Nivel de Conocimiento: {conversation_data.get('technical_assessment', {}).get('knowledge_level', 'N/A')}
-• Experiencia Práctica: {conversation_data.get('technical_assessment', {}).get('practical_experience', 'N/A')}
-
-**Preguntas Técnicas:**
-{format_technical_questions(conversation_data.get('technical_assessment', {}).get('technical_questions', []))}
-
----
-
-📝 **JUSTIFICACIÓN:**
-{result_data.get('justification', 'No disponible')}
-
----
-
-💬 **CONVERSACIÓN COMPLETA:**
-
-{conversation_text}
-
----
-
-🏢 **DATOS DEL CLIENTE:**
-• Cliente: {client_name}
-• Responsable: {client_responsible}
-• Teléfono: {client_phone}
-• Email: {client_email}
-
----
-
-🔍 **DETALLES ADICIONALES:**
-• Meet ID: {meet_id}
-• JD Interview ID: {jd_interviews_id}
-
-Saludos,
-Sistema de Evaluación de Candidatos
-                            """
+                            # Preparar datos para la plantilla
+                            tech_stack = candidate_data.get('tech_stack', [])
+                            tech_stack_str = ', '.join(tech_stack) if isinstance(tech_stack, list) else str(tech_stack)
+                            
+                            technical_assessment = conversation_data.get('technical_assessment', {})
+                            
+                            # Renderizar plantilla de email
+                            body = render_email_template(
+                                "evaluation_match.html",
+                                interview_name=interview_name,
+                                compatibility_score=result_data.get('compatibility_score', 0),
+                                final_recommendation=result_data.get('final_recommendation', 'N/A'),
+                                candidate_name=candidate_data.get('name', 'N/A'),
+                                candidate_email=candidate_data.get('email', 'N/A'),
+                                candidate_phone=candidate_data.get('phone', 'N/A'),
+                                candidate_tech_stack=tech_stack_str,
+                                candidate_cv_url=candidate_data.get('cv_url', 'N/A'),
+                                soft_skills_formatted=format_soft_skills(conversation_data.get('soft_skills', {})),
+                                knowledge_level=technical_assessment.get('knowledge_level', 'N/A'),
+                                practical_experience=technical_assessment.get('practical_experience', 'N/A'),
+                                technical_questions_formatted=format_technical_questions(technical_assessment.get('technical_questions', [])),
+                                justification=result_data.get('justification', 'No disponible'),
+                                conversation_text=conversation_text,
+                                client_name=client_name,
+                                client_responsible=client_responsible,
+                                client_phone=client_phone,
+                                client_email=client_email,
+                                meet_id=meet_id,
+                                jd_interviews_id=jd_interviews_id
+                            )
                             
                             # Enviar email
                             email_api_url = os.getenv("EMAIL_API_URL", "http://127.0.0.1:8004/send-simple-email")
@@ -891,12 +939,13 @@ Sistema de Evaluación de Candidatos
                                 "body": body
                             }
                             
-                            response = requests.post(
-                                email_api_url,
-                                json=payload,
-                                headers={'Content-Type': 'application/json'},
-                                timeout=30
-                            )
+                            #COMENTADO PARA PROBAR CON DATOS MOCKEADOS
+                            #response = requests.post(
+                            #     email_api_url,
+                            #     json=payload,
+                            #     headers={'Content-Type': 'application/json'},
+                            #     timeout=30
+                            # )
                             
                             response.raise_for_status()
                             email_sent = True
@@ -910,6 +959,14 @@ Sistema de Evaluación de Candidatos
                 evaluation_logger.log_error("Envío Email Match", f"Error enviando email de match: {str(email_error)}")
                 # No fallar la respuesta por error en el email
         
+        # Finalizar tracking de tokens
+        if tracker:
+            try:
+                out_path = tracker.finish_run()
+                print(f"✅ Token tracking completado. Log guardado en: {out_path}")
+            except Exception as tracker_error:
+                evaluation_logger.log_error("API", f"Error finalizando token tracker: {str(tracker_error)}")
+        
         return AnalysisResponse(
             status="success",
             message=f"Evaluación del meet {meet_id} completada exitosamente" + (f" - Email enviado" if email_sent else ""),
@@ -920,6 +977,12 @@ Sistema de Evaluación de Candidatos
         
     except Exception as e:
         evaluation_logger.log_error("API", f"Error en evaluación de meet: {str(e)}")
+        # Finalizar tracking incluso si hay error
+        if tracker:
+            try:
+                tracker.finish_run()
+            except:
+                pass
         raise HTTPException(status_code=500, detail=f"Error en la evaluación: {str(e)}")
     
     
@@ -991,6 +1054,224 @@ async def handle_outlook_notifications(payload: dict):
     except Exception as e:
         print(f"❌ Error procesando notificaciones: {str(e)}")
         evaluation_logger.log_error("Handle Notifications", f"Error procesando notificaciones: {str(e)}")
+
+class TokenEstimationResponse(BaseModel):
+    status: str
+    message: str
+    meet_id: str
+    model: str
+    estimated_input_tokens: int
+    estimated_completion_tokens: int
+    estimated_total_tokens: int
+    estimated_input_cost_usd: float
+    estimated_completion_cost_usd: float
+    estimated_total_cost_usd: float
+    timestamp: str
+
+@app.post("/estimate-meet-tokens", response_model=TokenEstimationResponse)
+async def estimate_meet_tokens(request: SingleMeetRequest):
+    """
+    Endpoint que estima el consumo de tokens antes de ejecutar el crew de evaluación de un meet
+    
+    Args:
+        request: Objeto con meet_id del meet a evaluar
+        
+    Returns:
+        Estimación de tokens y costo aproximado
+    """
+    try:
+        meet_id = request.meet_id
+        evaluation_logger.log_task_start("API", f"Estimando tokens para meet: {meet_id}")
+        
+        # Obtener datos del meet para estimar tokens
+        func_to_call = None
+        if hasattr(get_meet_evaluation_data, '__wrapped__'):
+            func_to_call = get_meet_evaluation_data.__wrapped__
+        elif hasattr(get_meet_evaluation_data, 'func'):
+            func_to_call = get_meet_evaluation_data.func
+        elif hasattr(get_meet_evaluation_data, '_func'):
+            func_to_call = get_meet_evaluation_data._func
+        elif callable(get_meet_evaluation_data) and not hasattr(get_meet_evaluation_data, 'name'):
+            func_to_call = get_meet_evaluation_data
+        
+        if not func_to_call:
+            raise HTTPException(status_code=500, detail="No se pudo acceder a la función get_meet_evaluation_data")
+        
+        meet_data_json = func_to_call(meet_id)
+        meet_data = json.loads(meet_data_json) if isinstance(meet_data_json, str) else meet_data_json
+        
+        # Obtener información del agente y tareas
+        evaluator_agent = create_single_meet_evaluator_agent()
+        extraction_task = create_single_meet_extraction_task(evaluator_agent, meet_id)
+        evaluation_task = create_single_meet_evaluation_task(evaluator_agent, extraction_task)
+
+        model = "gpt-5-nano"
+        # ===== TAREA 1: EXTRACTION TASK =====
+        # System message con backstory del agente
+        system_message = {
+            "role": "system",
+            "content": f"""Eres un {evaluator_agent.role}.
+            
+{evaluator_agent.backstory}
+
+Tu objetivo: {evaluator_agent.goal}"""
+        }
+        
+        # User message para extraction_task
+        extraction_user_message = {
+            "role": "user",
+            "content": extraction_task.description
+        }
+        
+        extraction_messages = [system_message, extraction_user_message]
+        extraction_input_tokens = estimate_task_tokens(extraction_messages, model)
+        
+        # Completion de extraction_task = los datos del meet (que ya tenemos)
+        extraction_output = json.dumps(meet_data, indent=2, ensure_ascii=False) if meet_data else ""
+        extraction_completion_tokens = estimate_completion_tokens(extraction_output, model)
+        
+        # ===== DESGLOSE DEL CONTEXTO =====
+        context_breakdown = breakdown_context_tokens(meet_data, model)
+        
+        # Calcular tokens de las descripciones de las tareas y backstory
+        try:
+            enc = tiktoken.encoding_for_model(model)
+        except KeyError:
+            enc = tiktoken.get_encoding("cl100k_base")
+        
+        # Tokens del backstory (compartido en ambas tareas)
+        backstory_tokens = len(enc.encode(system_message["content"]))
+        
+        # Tokens de descripción de cada tarea
+        extraction_task_description_tokens = len(enc.encode(extraction_task.description))
+        evaluation_task_description_tokens = len(enc.encode(evaluation_task.description))
+        
+        # Desglose del completion de extraction_task (los datos del meet)
+        extraction_completion_breakdown = breakdown_context_tokens(meet_data, model)
+        
+        # ===== TAREA 2: EVALUATION TASK =====
+        # User message con descripción de la tarea de evaluación + contexto (resultado de extraction_task)
+        evaluation_user_message_content = f"""{evaluation_task.description}
+
+## CONTEXTO - DATOS DEL MEET (resultado de la tarea anterior):
+{extraction_output}
+
+## SALIDA ESPERADA:
+{evaluation_task.expected_output}"""
+        
+        evaluation_user_message = {
+            "role": "user",
+            "content": evaluation_user_message_content
+        }
+        
+        evaluation_messages = [system_message, evaluation_user_message]
+        evaluation_input_tokens = estimate_task_tokens(evaluation_messages, model)
+        
+        # Completion de evaluation_task = JSON de evaluación completo
+        evaluation_completion_tokens = estimate_completion_tokens(evaluation_task.expected_output, model)
+        
+        # Desglose del completion de evaluation_task (basado en expected_output)
+        # El expected_output es un JSON grande con análisis completo
+        evaluation_completion_text = evaluation_task.expected_output
+        evaluation_completion_breakdown = {
+            "total": evaluation_completion_tokens,
+            "estimated_soft_skills": int(evaluation_completion_tokens * 0.30),  # ~30% para análisis de habilidades blandas
+            "estimated_technical": int(evaluation_completion_tokens * 0.25),  # ~25% para análisis técnico
+            "estimated_jd_analysis": int(evaluation_completion_tokens * 0.15),  # ~15% para análisis de JD
+            "estimated_match_evaluation": int(evaluation_completion_tokens * 0.20),  # ~20% para evaluación de match
+            "estimated_structure": int(evaluation_completion_tokens * 0.10),  # ~10% para estructura JSON
+        }
+        
+        # ===== TOTALES =====
+        total_input_tokens = extraction_input_tokens + evaluation_input_tokens
+        total_completion_tokens = extraction_completion_tokens + evaluation_completion_tokens
+        
+        # Calcular costos separados
+        cost_breakdown = estimate_cost(total_input_tokens, total_completion_tokens, model)
+        
+        # Mostrar estimación detallada
+        print(f"\n{'='*60}")
+        print(f"📊 ESTIMACIÓN DE TOKENS PARA MEET: {meet_id}")
+        print(f"{'='*60}")
+        print(f"Modelo: {model}\n")
+        
+        print(f"📋 TAREA 1: EXTRACTION")
+        print(f"  Input tokens: {extraction_input_tokens:,}")
+        print(f"  Completion tokens: {extraction_completion_tokens:,}")
+        print(f"  Subtotal: {extraction_input_tokens + extraction_completion_tokens:,} tokens")
+        
+        print(f"\n  🔍 Desglose Input (Tarea 1):")
+        print(f"    Backstory del agente: {backstory_tokens:,} tokens (~{backstory_tokens/extraction_input_tokens*100:.1f}%)")
+        print(f"    Descripción de la tarea: {extraction_task_description_tokens:,} tokens (~{extraction_task_description_tokens/extraction_input_tokens*100:.1f}%)")
+        
+        print(f"\n  🔍 Desglose Completion (Tarea 1):")
+        print(f"    Conversation data: {extraction_completion_breakdown['conversation_data']:,} tokens (~{extraction_completion_breakdown['conversation_data']/extraction_completion_tokens*100:.1f}%)")
+        print(f"    Job description: {extraction_completion_breakdown['job_description']:,} tokens (~{extraction_completion_breakdown['job_description']/extraction_completion_tokens*100:.1f}%)")
+        print(f"    Tech stack: {extraction_completion_breakdown['tech_stack']:,} tokens (~{extraction_completion_breakdown['tech_stack']/extraction_completion_tokens*100:.1f}%)")
+        print(f"    Resto del JSON: {extraction_completion_breakdown['resto_json']:,} tokens (~{extraction_completion_breakdown['resto_json']/extraction_completion_tokens*100:.1f}%)")
+        print(f"    Total datos: {extraction_completion_breakdown['total_context']:,} tokens\n")
+        
+        print(f"📋 TAREA 2: EVALUATION")
+        print(f"  Input tokens: {evaluation_input_tokens:,}")
+        print(f"  Completion tokens: {evaluation_completion_tokens:,}")
+        print(f"  Subtotal: {evaluation_input_tokens + evaluation_completion_tokens:,} tokens")
+        
+        print(f"\n  🔍 Desglose Input (Tarea 2):")
+        print(f"    Backstory del agente: {backstory_tokens:,} tokens (~{backstory_tokens/evaluation_input_tokens*100:.1f}%)")
+        print(f"    Descripción de la tarea: {evaluation_task_description_tokens:,} tokens (~{evaluation_task_description_tokens/evaluation_input_tokens*100:.1f}%)")
+        print(f"    Conversation data: {context_breakdown['conversation_data']:,} tokens (~{context_breakdown['conversation_data']/evaluation_input_tokens*100:.1f}%)")
+        print(f"    Job description: {context_breakdown['job_description']:,} tokens (~{context_breakdown['job_description']/evaluation_input_tokens*100:.1f}%)")
+        print(f"    Tech stack: {context_breakdown['tech_stack']:,} tokens (~{context_breakdown['tech_stack']/evaluation_input_tokens*100:.1f}%)")
+        print(f"    Resto del JSON (estructura/metadatos): {context_breakdown['resto_json']:,} tokens (~{context_breakdown['resto_json']/evaluation_input_tokens*100:.1f}%)")
+        print(f"    Total contexto: {context_breakdown['total_context']:,} tokens (~{context_breakdown['total_context']/evaluation_input_tokens*100:.1f}%)")
+        
+        print(f"\n  🔍 Desglose Completion (Tarea 2):")
+        print(f"    Análisis habilidades blandas: ~{evaluation_completion_breakdown['estimated_soft_skills']:,} tokens (~{evaluation_completion_breakdown['estimated_soft_skills']/evaluation_completion_tokens*100:.1f}%)")
+        print(f"    Análisis técnico: ~{evaluation_completion_breakdown['estimated_technical']:,} tokens (~{evaluation_completion_breakdown['estimated_technical']/evaluation_completion_tokens*100:.1f}%)")
+        print(f"    Análisis JD: ~{evaluation_completion_breakdown['estimated_jd_analysis']:,} tokens (~{evaluation_completion_breakdown['estimated_jd_analysis']/evaluation_completion_tokens*100:.1f}%)")
+        print(f"    Evaluación de match: ~{evaluation_completion_breakdown['estimated_match_evaluation']:,} tokens (~{evaluation_completion_breakdown['estimated_match_evaluation']/evaluation_completion_tokens*100:.1f}%)")
+        print(f"    Estructura JSON: ~{evaluation_completion_breakdown['estimated_structure']:,} tokens (~{evaluation_completion_breakdown['estimated_structure']/evaluation_completion_tokens*100:.1f}%)")
+        print(f"    Total completion: {evaluation_completion_tokens:,} tokens\n")
+        
+        print(f"📊 TOTALES")
+        print(f"  Input tokens totales: {total_input_tokens:,}")
+        print(f"  Completion tokens totales: {total_completion_tokens:,}")
+        print(f"  Total tokens: {cost_breakdown['total_tokens']:,}\n")
+        
+        print(f"💰 COSTOS")
+        print(f"  Costo Input: ${cost_breakdown['input_cost']:.4f} USD")
+        print(f"  Costo Completion: ${cost_breakdown['output_cost']:.4f} USD")
+        print(f"  Costo Total: ${cost_breakdown['total_cost']:.4f} USD")
+        print(f"{'='*60}\n")
+        
+        evaluation_logger.log_task_complete(
+            "API", 
+            f"Estimación completada: {cost_breakdown['total_tokens']:,} tokens totales "
+            f"({total_input_tokens:,} input + {total_completion_tokens:,} completion) | "
+            f"${cost_breakdown['total_cost']:.4f} USD"
+        )
+        
+        return TokenEstimationResponse(
+            status="success",
+            message=f"Estimación de tokens calculada exitosamente",
+            meet_id=meet_id,
+            model=model,
+            estimated_input_tokens=total_input_tokens,
+            estimated_completion_tokens=total_completion_tokens,
+            estimated_total_tokens=cost_breakdown['total_tokens'],
+            estimated_input_cost_usd=cost_breakdown['input_cost'],
+            estimated_completion_cost_usd=cost_breakdown['output_cost'],
+            estimated_total_cost_usd=cost_breakdown['total_cost'],
+            timestamp=datetime.now().isoformat()
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        error_msg = f"Error al estimar tokens: {str(e)}"
+        print(f"❌ {error_msg}")
+        evaluation_logger.log_error("API", error_msg)
+        raise HTTPException(status_code=500, detail=error_msg)
 
 if __name__ == "__main__":
     import uvicorn

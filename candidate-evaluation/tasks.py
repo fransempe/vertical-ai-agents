@@ -649,9 +649,9 @@ def create_filtered_extraction_task(agent, jd_interview_id: str):
         Asegurar que cada registro incluya:
         - meet_id, candidate_id, conversation_data (campos específicos de conversations)
         - Datos completos del candidato (id, name, email, phone, cv_url, tech_stack)
-        - Información del jd_interview (id, nombre, agent_id)
+        - Información del jd_interview (nombre, agent_id, client_id)
         """,
-        expected_output=f"Lista JSON de conversaciones filtradas por jd_interview_id: {jd_interview_id} con toda la información relacionada. Si no hay conversaciones, incluir mensaje informativo: 'No se han presentado candidatos para esta entrevista'. IMPORTANTE: Incluir siempre la información del jd_interview (id, name, agent_id) para usar en el título del reporte.",
+        expected_output=f"Lista JSON de conversaciones filtradas por jd_interview_id: {jd_interview_id} con toda la información relacionada. Si no hay conversaciones, incluir mensaje informativo: 'No se han presentado candidatos para esta entrevista'. IMPORTANTE: Incluir siempre la información del jd_interview (id, name, agent_id, client_id) para usar en el título del reporte.",
         agent=agent
     )
 
@@ -694,7 +694,7 @@ def create_matching_task(agent):
            - Para cada candidato con matches, incluir:
              * Datos completos del candidato (id, name, email, phone, cv_url, tech_stack)
              * Lista de entrevistas que coinciden con sus datos
-            * Para cada entrevista: registro completo de jd_interviews (id, interview_name, agent_id, job_description, created_at) + score de compatibilidad + análisis del match
+             * Para cada entrevista: registro completo de jd_interviews (id, interview_name, agent_id, job_description, client_id, created_at) + score de compatibilidad + análisis del match
         
         6. 📝 **Formato de Salida SIMPLIFICADO:**
            ```json
@@ -716,6 +716,7 @@ def create_matching_task(agent):
                        "interview_name": "Desarrollador React Senior",
                        "agent_id": "agent_123",
                        "job_description": "Buscamos desarrollador con React, JavaScript...",
+                       "client_id": "client_456",
                        "created_at": "2025-01-18T10:30:00Z"
                      },
                      "compatibility_score": 85,
@@ -749,14 +750,20 @@ def create_single_meet_extraction_task(agent, meet_id: str):
         Extraer todos los datos necesarios para evaluar el meet con ID: {meet_id}
         
         Debes obtener:
-        - Información completa del meet (id, jd_interviews_id, fechas)
+        - Información completa del meet (id, jd_interviews_id)
         - Conversación asociada al meet (conversation_data)
         - Datos completos del candidato (id, name, email, phone, cv_url, tech_stack)
-        - Información del JD interview asociado (id, interview_name, agent_id, job_description)
+        - Información del JD interview asociado (id, interview_name, agent_id, job_description, client_id)
+        - Información del cliente asociado (id, name, email, phone)
         
-        Usar get_meet_evaluation_data(meet_id="{meet_id}") para obtener todos los datos.
+        **IMPORTANTE:** Debes usar la herramienta get_meet_evaluation_data pasando el meet_id: {meet_id}
+        El meet_id que debes usar es: {meet_id}
+        NO uses placeholders como "<MEET_ID>" o variables, usa el valor exacto: {meet_id}
+        
+        Ejemplo de uso correcto: get_meet_evaluation_data(meet_id="{meet_id}")
         """,
-        expected_output="JSON completo con meet, conversation, candidate y jd_interview",
+        expected_output="JSON completo con meet, conversation, candidate, jd_interview y client",
+        max_iter=2,
         agent=agent
     )
 
@@ -902,11 +909,42 @@ def create_single_meet_evaluation_task(agent, extraction_task):
         }}
         ```
         
+        **⚠️ PROHIBICIÓN ABSOLUTA - REGLAS CRÍTICAS:**
+        
+        1. **NUNCA INVENTES DATOS:**
+           - NO inventes nombres, emails, teléfonos, proyectos, empresas o experiencias
+           - NO inventes respuestas del candidato que no estén en conversation_data
+           - NO inventes preguntas técnicas que no estén en la conversación
+           - NO inventes datos de clientes o empresas
+           - NO asumas información que no esté explícitamente en los datos proporcionados
+        
+        2. **SOLO USA DATOS REALES:**
+           - Usa ÚNICAMENTE la información que viene de get_meet_evaluation_data
+           - Todo debe estar basado en conversation_data, candidate, jd_interview o client
+           - Si no hay evidencia para evaluar algo, escribe: "No hay evidencia suficiente en los datos proporcionados"
+        
+        3. **PARA HABILIDADES BLANDAS:**
+           - Analiza SOLO lo que el candidato dijo o demostró en la conversación
+           - Si no hay evidencia de una habilidad, indica: "No se encontró evidencia suficiente en la conversación"
+           - NO inventes ejemplos o situaciones que no estén en conversation_data
+        
+        4. **PARA PREGUNTAS TÉCNICAS:**
+           - Copia EXACTAMENTE el texto de las preguntas que están en conversation_data
+           - Copia EXACTAMENTE las respuestas del candidato que están en conversation_data
+           - NO inventes preguntas o respuestas que no estén en los datos
+           - Si no hay preguntas técnicas en la conversación, indica: "No se encontraron preguntas técnicas en la conversación"
+        
+        5. **PARA EVALUACIÓN DE MATCH:**
+           - Compara SOLO lo que está en los datos reales
+           - NO inventes tecnologías, proyectos o experiencias del candidato
+           - NO inventes requisitos de la JD que no estén en job_description
+        
         IMPORTANTE: 
         - Ser exhaustivo pero conciso
-        - Basar todas las evaluaciones en evidencia específica
+        - Basar todas las evaluaciones en evidencia específica REAL de los datos
+        - Si no hay evidencia, indicarlo claramente en lugar de inventar
         - Todo el análisis en ESPAÑOL LATINO
-        - Proporcionar justificaciones claras para la determinación de match
+        - Proporcionar justificaciones claras para la determinación de match basadas SOLO en datos reales
         """,
         expected_output="JSON completo con análisis exhaustivo y determinación de match potencial",
         agent=agent,
