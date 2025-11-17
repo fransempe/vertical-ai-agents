@@ -2,7 +2,7 @@
 import os
 from crewai import Agent
 from langchain_openai import ChatOpenAI
-from tools.supabase_tools import extract_supabase_conversations, fetch_job_description, send_evaluation_email, get_current_date, get_jd_interviews_data, get_candidates_data, get_all_jd_interviews, get_conversations_by_jd_interview, get_meet_evaluation_data, save_interview_evaluation
+from tools.supabase_tools import extract_supabase_conversations, fetch_job_description, send_evaluation_email, get_current_date, get_jd_interviews_data, get_candidates_data, get_all_jd_interviews, get_conversations_by_jd_interview, get_meet_evaluation_data, save_interview_evaluation, get_client_email
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -12,8 +12,14 @@ llm = ChatOpenAI(
     model="gpt-4o-mini", #"gpt-4o-mini",
     #model="gpt-5-nano",
     api_key=os.getenv("OPENAI_API_KEY"),
-    temperature=0.1
 )
+
+FINAL = ChatOpenAI(
+    model="gpt-5-nano",
+    api_key=os.getenv("OPENAI_API_KEY"),
+)
+
+common_agent_kwargs = dict(verbose=False, max_iter=1, allow_delegation=False, memory=False)
 
 def create_data_extractor_agent():
     """Crea el agente extractor de datos"""
@@ -22,10 +28,15 @@ def create_data_extractor_agent():
         goal="Extraer datos de conversaciones desde Supabase incluyendo información de candidates y meets",
         backstory="""Eres un especialista en extracción de datos con experiencia en bases de datos.
         Tu trabajo es obtener información completa de la tabla conversations, asegurándote de incluir
-        todos los datos relacionados al candidato y a la tabla meets mediante joins correctos.""",
+        todos los datos relacionados al candidato y a la tabla meets mediante joins correctos.
+
+        **PROHIBICIÓN ABSOLUTA:** NUNCA inventes datos de candidatos, entrevistas, conversaciones o clientes.
+        Solo debes extraer información real desde la base de datos para que luego se generen reportes.
+        
+        **TL;DR:** Sé conciso. Extrae solo datos necesarios. Evita explicaciones largas.""",
         tools=[extract_supabase_conversations],
-        verbose=False,
-        llm=llm
+        **common_agent_kwargs,
+        llm=FAST
     )
 
 def create_filtered_data_extractor_agent():
@@ -48,10 +59,8 @@ def create_conversation_analyzer_agent():
     """Crea el agente analizador de conversaciones"""
     return Agent(
         role="Senior Conversation Analysis & HR Assessment Expert",
-        goal="Realizar análisis exhaustivos y profesionales de conversaciones de candidatos, evaluando habilidades blandas, técnicas y potencial de contratación",
-        backstory="""Eres un experto senior en análisis de conversaciones con más de 15 años de experiencia en recursos humanos 
-        y evaluación de talento. Tu especialidad es realizar análisis profundos y objetivos de conversaciones entre candidatos 
-        y sistemas de entrevistas de IA.
+        goal="Analizar conversaciones de candidatos evaluando habilidades blandas, técnicas y potencial de contratación",
+        backstory="""Experto en análisis de conversaciones y evaluación de talento. Analizas la FORMA de responder (estructura, claridad, confianza) y el contenido técnico.
 
         Tienes experiencia en:
         - Psicología organizacional y evaluación de competencias
@@ -106,10 +115,15 @@ def create_job_description_analyzer_agent():
         sin puntajes numéricos detallados.
         
         IMPORTANTE: Todas tus respuestas y análisis deben ser en ESPAÑOL LATINO.
-        Utiliza terminología de recursos humanos y análisis laboral en español de América Latina.""",
+        Utiliza terminología de recursos humanos y análisis laboral en español de América Latina.
+
+        **PROHIBICIÓN ABSOLUTA:** NUNCA inventes datos de candidatos, entrevistas, conversaciones o clientes.
+        Usa únicamente la información real de la base de datos; tu tarea es interpretarla y generar el reporte de evaluación.
+        
+        **TL;DR:** Responde breve y directo. Solo análisis esencial, sin texto innecesario.""",
         tools=[get_jd_interviews_data],
-        verbose=True,
-        llm=llm
+        **common_agent_kwargs,
+        llm=FAST,
     )
 
 def create_data_processor_agent():
@@ -119,9 +133,14 @@ def create_data_processor_agent():
         goal="Coordinar el procesamiento completo y generar reportes finales estructurados",
         backstory="""Eres un coordinador experto en procesamiento de datos que combina información
         de múltiples fuentes. Tu trabajo es asegurar que todos los datos se procesen correctamente
-        y generar reportes finales bien estructurados.""",
-        verbose=False,
-        llm=llm
+        y generar reportes finales bien estructurados.
+        
+        **PROHIBICIÓN ABSOLUTA:** NUNCA inventes datos de candidatos, entrevistas, conversaciones o clientes.
+        Solo debes combinar y formatear la información real proveniente de la base de datos para producir el reporte.
+        
+        **TL;DR:** Combina datos eficientemente. Genera reportes concisos. Sin texto redundante.""",
+        **common_agent_kwargs,
+        llm=FAST,
     )
 
 def create_evaluation_saver_agent():
@@ -142,26 +161,35 @@ def create_evaluation_saver_agent():
         - El summary debe tener estructura: {{"kpis": {{"completed_interviews": int, "avg_score": float}}, "notes": string}}
         - Si hay jd_interview_id, DEBES guardar - no es opcional
         - Si no hay jd_interview_id, retorna mensaje claro de por qué no se puede guardar
-        - Después de llamar a save_interview_evaluation, retorna el resultado y TERMINA""",
+        - Después de llamar a save_interview_evaluation, retorna el resultado y TERMINA
+        
+        **PROHIBICIÓN ABSOLUTA:** NUNCA inventes datos de candidatos, entrevistas, conversaciones o clientes.
+        Usa únicamente la información real que llega desde la base de datos para construir y guardar el reporte de evaluación.
+        
+        **TL;DR:** Extrae y guarda. Una llamada. Responde solo confirmación. Sin explicaciones largas.""",
         tools=[save_interview_evaluation, get_jd_interviews_data],
-        verbose=True,
-        llm=llm,
-        max_iter=3,
-        allow_delegation=False
+        **common_agent_kwargs,
+        llm=FAST
     )
 
 def create_email_sender_agent():
     """Crea el agente de envío de emails"""
+    email_agent_kwargs = dict(common_agent_kwargs)
+    email_agent_kwargs.update({"max_iter": 5, "verbose": True})
     return Agent(
         role="Email Communication Specialist",
         goal="Enviar por email TODA la evaluación completa de candidatos en formato de texto legible y estructurado",
         backstory="""Eres un especialista en comunicaciones que se encarga de convertir y enviar
-        los resultados completos del análisis de candidatos por email.         Tu trabajo es tomar
+        los resultados completos del análisis de candidatos por email. Tu trabajo es tomar
         toda la información procesada (análisis de conversaciones, evaluaciones de habilidades,
         comparaciones, estadísticas, recomendaciones) y crear UN ÚNICO email con todo el contenido
         en formato de texto legible y bien estructurado, incluyendo un ranking de los mejores candidatos.
         
-        RESTRICCIÓN CRÍTICA: Solo puedes enviar UN email por ejecución. No envíes duplicados.
+        **EJECUCIÓN OBLIGATORIA:** Esta tarea DEBE ejecutarse SIEMPRE. Si processing_task no tiene datos completos, usar datos de extraction_task o analysis_task.
+        
+        **OBTENCIÓN DE EMAIL DEL CLIENTE:** Usar get_jd_interviews_data(jd_interview_id) para obtener client_id, luego get_client_email(client_id) para obtener el email. Usar ese email en send_evaluation_email(subject, body, to_email=email_del_cliente).
+        
+        RESTRICCIÓN CRÍTICA: Solo puedes enviar UN email por ejecución. Llamar a send_evaluation_email EXACTAMENTE UNA VEZ.
         
         El email debe incluir la evaluación completa de cada candidato con todos los detalles,
         puntajes, análisis y recomendaciones en texto plano, fácil de leer, con títulos y secciones claras.
@@ -196,10 +224,15 @@ def create_email_sender_agent():
         ❌ Ejemplo incorrecto: "💬 Comunicación: 8 (colocar el puntaje de 0 a 10)"
         
         IMPORTANTE: Todo el contenido del email debe estar en ESPAÑOL LATINO.
-        Utiliza un lenguaje profesional y claro en español de América Latina.""",
-        tools=[send_evaluation_email, get_current_date],
-        verbose=True,
-        llm=llm
+        Utiliza un lenguaje profesional y claro en español de América Latina.
+
+        **PROHIBICIÓN ABSOLUTA:** NUNCA inventes datos de candidatos, entrevistas, conversaciones o clientes.
+        Usa únicamente la información real proveniente de la base de datos; tu rol es transformarla en un reporte de evaluación estructurado y enviarlo.
+        
+        **TL;DR:** Email completo pero estructurado. Sin redundancias. Contenido esencial bien formateado.""",
+        tools=[send_evaluation_email, get_current_date, get_jd_interviews_data, get_client_email],
+        **email_agent_kwargs,
+        llm=FINAL,
     )
 
 def create_candidate_matching_agent():
@@ -237,10 +270,15 @@ def create_candidate_matching_agent():
         - Potencial de aprendizaje y adaptación
         
         IMPORTANTE: Todo el análisis debe estar en ESPAÑOL LATINO.
-        Utiliza terminología de recursos humanos en español de América Latina.""",
+        Utiliza terminología de recursos humanos en español de América Latina.
+
+        **PROHIBICIÓN ABSOLUTA:** NUNCA inventes datos de candidatos, entrevistas, conversaciones o clientes.
+        Trabaja únicamente con la información real de la base de datos para generar los reportes de matching.
+        
+        **TL;DR:** Análisis conciso. Solo scores y matches esenciales. Sin texto innecesario.""",
         tools=[get_candidates_data, get_all_jd_interviews],
-        verbose=True,
-        llm=llm
+        **common_agent_kwargs,
+        llm=FAST,
     )
 
 def create_single_meet_evaluator_agent():

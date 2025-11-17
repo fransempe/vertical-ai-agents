@@ -172,7 +172,13 @@ def fetch_job_description(job_description: str) -> str:
         return json.dumps({"error": f"Unexpected error: {str(e)}", "success": False}, indent=2)
 
 @tool
-def send_evaluation_email(subject: str, body: str) -> str:
+def send_evaluation_email(
+    subject: str,
+    body: str,
+    to_email: str = None,
+    jd_interview_id: str = None,
+    evaluation_id: str = None
+) -> str:
     """
     Envía un email con los resultados de evaluación usando la API local.
     
@@ -184,6 +190,13 @@ def send_evaluation_email(subject: str, body: str) -> str:
         JSON string con el resultado del envío
     """
     try:
+        print("=" * 80)
+        print("📧 [send_evaluation_email] FUNCIÓN EJECUTADA - Iniciando envío de email")
+        print(f"📧 [send_evaluation_email] Subject: {subject}")
+        print(f"📧 [send_evaluation_email] To email: {to_email or 'NO PROPORCIONADO'}")
+        print(f"📧 [send_evaluation_email] Body length: {len(body) if body else 0} caracteres")
+        print("=" * 80)
+        
         evaluation_logger.log_task_start("Envío de Email", "Email Sender")
         evaluation_logger.log_task_progress("Envío de Email", f"Preparando email: {subject}")
         
@@ -201,7 +214,25 @@ def send_evaluation_email(subject: str, body: str) -> str:
             pass
         # Fallback final si no se detecta ninguno
         if not to_email:
-            to_email = "flocklab.id@gmail.com"
+            print(f"📧 [send_evaluation_email] ⚠️ No se proporcionó to_email, intentando detectarlo...")
+            to_email = os.getenv("REPORT_TO_EMAIL", "")
+            try:
+                import re as _re
+                # Buscar el primer email en el cuerpo (por ejemplo, jd_interview_email_source o similares)
+                email_match = _re.search(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", body or "")
+                if not to_email and email_match:
+                    detected_email = email_match.group(0)
+                    # Validar que no sea un email inventado
+                    to_email = detected_email
+            except Exception:
+                pass
+            # Fallback final si no se detecta ninguno
+            if not to_email:
+                to_email = "flocklab.id@gmail.com"
+                print(f"📧 [send_evaluation_email] ⚠️ Usando email de fallback: {to_email} (no se pudo obtener email del cliente)")
+                evaluation_logger.log_task_progress("Envío de Email", f"⚠️ Usando email de fallback: {to_email} (no se pudo obtener email del cliente)")
+        
+        print(f"📧 [send_evaluation_email] Email final a usar: {to_email}")
         
         payload = {
             "to_email": to_email,
@@ -210,15 +241,40 @@ def send_evaluation_email(subject: str, body: str) -> str:
         }
         
         evaluation_logger.log_task_progress("Envío de Email", f"Enviando a {to_email} via {email_api_url}")
+        print(f"📧 [send_evaluation_email] Enviando email a {to_email} via {email_api_url}")
+        print(f"📧 [send_evaluation_email] Subject: {subject[:50]}...")
         
-        response = requests.post(
-            email_api_url,
-            json=payload,
-            headers={'Content-Type': 'application/json'},
-            timeout=30
-        )
+        try:
+            response = requests.post(
+                email_api_url,
+                json=payload,
+                headers={'Content-Type': 'application/json'},
+                timeout=30
+            )
+            print(f"📊 Response status: {response.status_code}")
+            print(f"📊 Response body: {response.text[:200]}")
+            
+            response.raise_for_status()
+        except requests.exceptions.ConnectionError as ce:
+            print(f"❌ ERROR DE CONEXIÓN: No se pudo conectar a {email_api_url}")
+            print(f"❌ Detalle: {str(ce)}")
+            raise
+        except requests.exceptions.Timeout as te:
+            print(f"❌ ERROR DE TIMEOUT: La petición tardó más de 30 segundos")
+            print(f"❌ Detalle: {str(te)}")
+            raise
+        except requests.exceptions.HTTPError as he:
+            print(f"❌ ERROR HTTP: {he.response.status_code if he.response else 'Sin respuesta'}")
+            print(f"❌ Detalle: {str(he)}")
+            if he.response:
+                print(f"❌ Response body: {he.response.text[:500]}")
+            raise
         
-        response.raise_for_status()
+        print("=" * 80)
+        print(f"✅ [send_evaluation_email] EMAIL ENVIADO EXITOSAMENTE")
+        print(f"✅ [send_evaluation_email] Destinatario: {to_email}")
+        print(f"✅ [send_evaluation_email] Status Code: {response.status_code}")
+        print("=" * 80)
         
         evaluation_logger.log_email_sent(to_email, subject, "success")
         evaluation_logger.log_task_complete("Envío de Email", f"Email enviado exitosamente con código {response.status_code}")
@@ -231,6 +287,9 @@ def send_evaluation_email(subject: str, body: str) -> str:
         }, indent=2)
         
     except requests.exceptions.RequestException as e:
+        print("=" * 80)
+        print(f"❌ [send_evaluation_email] ERROR DE PETICIÓN: {str(e)}")
+        print("=" * 80)
         evaluation_logger.log_email_sent("flocklab.id@gmail.com", subject, f"error: {str(e)}")
         evaluation_logger.log_error("Envío de Email", f"Error de petición: {str(e)}")
         return json.dumps({
@@ -238,6 +297,9 @@ def send_evaluation_email(subject: str, body: str) -> str:
             "message": f"Error enviando email: {str(e)}"
         }, indent=2)
     except Exception as e:
+        print("=" * 80)
+        print(f"❌ [send_evaluation_email] ERROR INESPERADO: {str(e)}")
+        print("=" * 80)
         evaluation_logger.log_error("Envío de Email", f"Error inesperado: {str(e)}")
         return json.dumps({
             "status": "error",
@@ -342,30 +404,61 @@ def get_all_jd_interviews() -> str:
         return json.dumps({"error": f"Error obteniendo datos de jd_interviews: {str(e)}"}, indent=2)
 
 @tool
-def get_jd_interviews_data(interview_id: str = None) -> str:
+def get_jd_interviews_data(jd_interview_id: str = None) -> str:
     """
     Obtiene datos de la tabla jd_interviews, incluyendo job_description para análisis dinámico.
     
+    ⚠️ IMPORTANTE: Esta herramienta NO debe llamarse múltiples veces. Si ya tienes los datos, úsalos directamente.
+    
     Args:
-        interview_id: ID específico de la entrevista (opcional, si no se proporciona obtiene todas)
+        jd_interview_id: ID específico de la entrevista que viene del POST del endpoint /analyze.
+                         Este ID se puede extraer de los datos de extraction_task o processing_task.
+                         Si se proporciona, obtiene solo ese registro. Si no se proporciona, obtiene todas (limitado a 50).
         
     Returns:
-        JSON string con los datos de jd_interviews
+        JSON string con los datos de jd_interviews incluyendo:
+        - id: ID del jd_interview
+        - interview_name: Nombre de la entrevista
+        - agent_id: ID del agente
+        - job_description: Descripción del trabajo (truncado a 5000 chars)
+        - client_id: ID del cliente (IMPORTANTE: se usa para obtener el email del cliente)
+        - created_at: Fecha de creación
     """
     try:
-        evaluation_logger.log_task_start("Obtener JD Interview Data", "JD Interview Data Extractor")
+        evaluation_logger.log_task_start("Obtener JD Interview Data", f"JD Interview Data Extractor - ID: {jd_interview_id or 'ALL'}")
+        print(f"📊 get_jd_interviews_data - jd_interview_id: {jd_interview_id or 'ALL'}")
         
         url = os.getenv("SUPABASE_URL")
         key = os.getenv("SUPABASE_KEY")
+        
+        if not url or not key:
+            error_msg = "SUPABASE_URL o SUPABASE_KEY no configurados"
+            print(f"❌ {error_msg}")
+            evaluation_logger.log_error("Obtener JD Interview Data", error_msg)
+            return json.dumps({"error": error_msg}, indent=2)
+        
         supabase = create_client(url, key)
         
-        if interview_id:
-            response = supabase.table('jd_interviews').select('*').eq('id', interview_id).execute()
+        print(f"📊 Consultando tabla jd_interviews...")
+        if jd_interview_id:
+            response = supabase.table('jd_interviews').select('*').eq('id', jd_interview_id).limit(1).execute()
         else:
-            response = supabase.table('jd_interviews').select('*').execute()
+            # Limitar a 50 registros para evitar respuestas muy grandes
+            response = supabase.table('jd_interviews').select('*').limit(50).execute()
+        
+        if not response.data:
+            msg = f"No se encontraron registros" + (f" con ID: {jd_interview_id}" if jd_interview_id else "")
+            print(f"⚠️ {msg}")
+            evaluation_logger.log_task_progress("Obtener JD Interview Data", msg)
+            return json.dumps([], indent=2)
         
         interviews = []
         for row in response.data:
+            job_desc = row.get('job_description', '')
+            # Truncar job_description a 5000 caracteres para evitar problemas de tokens
+            if job_desc and len(job_desc) > 5000:
+                job_desc = job_desc[:5000] + "... [truncado]"
+            
             interview = {
                 "id": row.get('id'),
                 "interview_name": row.get('interview_name'),
@@ -376,12 +469,26 @@ def get_jd_interviews_data(interview_id: str = None) -> str:
             }
             interviews.append(interview)
         
-        evaluation_logger.log_task_complete("Obtener JD Interview Data", f"{len(interviews)} registros obtenidos")
-        return json.dumps(interviews, indent=2)
+        result_json = json.dumps(interviews, indent=2)
+        result_size = len(result_json)
+        
+        print(f"✅ {len(interviews)} registro(s) obtenido(s) - Tamaño respuesta: {result_size} chars")
+        evaluation_logger.log_task_complete("Obtener JD Interview Data", f"{len(interviews)} registros obtenidos ({result_size} chars)")
+        
+        # Si la respuesta es muy grande, advertir
+        if result_size > 100000:
+            print(f"⚠️ ADVERTENCIA: Respuesta muy grande ({result_size} chars), puede causar problemas de tokens")
+        
+        return result_json
         
     except Exception as e:
-        evaluation_logger.log_error("Obtener JD Interview Data", f"Error obteniendo datos: {str(e)}")
-        return json.dumps({"error": f"Error obteniendo datos de jd_interviews: {str(e)}"}, indent=2)
+        error_msg = f"Error obteniendo datos: {str(e)}"
+        print(f"❌ {error_msg}")
+        print(f"❌ Tipo de error: {type(e).__name__}")
+        import traceback
+        print(f"❌ Traceback: {traceback.format_exc()[:500]}")
+        evaluation_logger.log_error("Obtener JD Interview Data", error_msg)
+        return json.dumps({"error": error_msg, "type": type(e).__name__}, indent=2)
 
 @tool
 def get_current_date() -> str:
@@ -415,10 +522,11 @@ def get_conversations_by_jd_interview(jd_interview_id: str, limit: int = 100) ->
     """
     Obtiene conversaciones filtradas por jd_interview_id.
     
+    ⚠️ IMPORTANTE: Esta herramienta NO debe llamarse múltiples veces. Si ya tienes los datos, úsalos directamente.
+    
     Flujo:
     1. Obtener jd_interview por ID
-    2. Buscar meets que tengan jd_interviews_id = jd_interview_id
-    3. Obtener conversaciones de esos meets
+    2. Buscar conversaciones que tengan jd_interviews_id = jd_interview_id
     
     Args:
         jd_interview_id: ID de la entrevista a filtrar
@@ -460,10 +568,22 @@ def get_conversations_by_jd_interview(jd_interview_id: str, limit: int = 100) ->
         # 2. Buscar meets que tengan jd_interviews_id = jd_interview_id
         meets_response = supabase.table('meets').select('*').eq('jd_interviews_id', jd_interview_id).execute()
         
-        if not meets_response.data:
-            evaluation_logger.log_task_progress("Obtener Conversaciones por JD Interview", f"No se encontraron meets para jd_interview_id: {jd_interview_id}")
-            return json.dumps({
-                "message": f"No se han presentado candidatos para esta entrevista (jd_interview_id: {jd_interview_id})",
+        conversations = []
+        for row in conversations_response.data or []:
+            candidate_data = row.get('candidates') or {}
+            conversation = {
+                "conversation_id": row.get('id'),
+                "meet_id": row.get('meet_id'),
+                "candidate_id": row.get('candidate_id'),
+                "conversation_data": row.get('conversation_data'),
+                "candidate": {
+                    "id": candidate_data.get('id'),
+                    "name": candidate_data.get('name'),
+                    "email": candidate_data.get('email'),
+                    "phone": candidate_data.get('phone'),
+                    "cv_url": candidate_data.get('cv_url'),
+                    "tech_stack": candidate_data.get('tech_stack')
+                },
                 "jd_interview_id": jd_interview_id,
                 "jd_interview_name": jd_interview.get('interview_name'),
                 "jd_interview_agent_id": jd_interview.get('agent_id'),
@@ -644,6 +764,12 @@ def save_meet_evaluation(full_result: str) -> str:
         
         url = os.getenv("SUPABASE_URL")
         key = os.getenv("SUPABASE_KEY")
+        
+        if not url or not key:
+            error_msg = "SUPABASE_URL o SUPABASE_KEY no configurados"
+            evaluation_logger.log_error("Obtener Email de Cliente", error_msg)
+            return json.dumps({"error": error_msg}, indent=2)
+        
         supabase = create_client(url, key)
         
         # Parsear full_result si viene como string

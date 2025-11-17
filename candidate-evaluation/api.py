@@ -38,6 +38,18 @@ GRAPH_BASE = os.getenv("GRAPH_BASE", "https://graph.microsoft.com/v1.0")
 OUTLOOK_USER_ID = os.getenv("OUTLOOK_USER_ID", "")
 
 
+# ====== Validations ======
+
+def _is_valid_uuid(value: str | None) -> bool:
+    if not value or not isinstance(value, (str, bytes)):
+        return False
+    try:
+        UUID(str(value))
+        return True
+    except Exception:
+        return False
+
+
 # ====== Helpers ======
 
 async def get_graph_app_token() -> str:
@@ -259,6 +271,9 @@ async def trigger_analysis(request: AnalysisRequest = None):
         # Log inicio del proceso
         jd_interview_id = request.jd_interview_id if request else None
         if jd_interview_id:
+            if not _is_valid_uuid(jd_interview_id):
+                evaluation_logger.log_error("API", f"jd_interview_id inválido recibido: {jd_interview_id}")
+                raise HTTPException(status_code=400, detail=f"jd_interview_id inválido: {jd_interview_id}")
             evaluation_logger.log_task_start("API", f"Iniciando proceso de análisis filtrado por jd_interview_id: {jd_interview_id}")
         else:
             evaluation_logger.log_task_start("API", "Iniciando proceso de análisis completo")
@@ -269,48 +284,41 @@ async def trigger_analysis(request: AnalysisRequest = None):
                         
         # Crear y ejecutar crew (filtrado o completo)
         if jd_interview_id:
-            crew = create_filtered_data_processing_crew(jd_interview_id)
-        else:
-            crew = create_data_processing_crew()
-        result = crew.kickoff()
-        
-        # Guardar resultados
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"conversation_results_{timestamp}.json"
-        
+            try:
+                supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
+                
+                jd_response = supabase.table('jd_interviews').select('client_id').eq('id', jd_interview_id).limit(1).execute()
+                if jd_response.data:
+                    jd_record = jd_response.data[0]
+                    client_id = jd_record.get('client_id')
+                    evaluation_logger.log_task_progress("API", f"client_id obtenido para jd_interview {jd_interview_id}: {client_id}")
+                    
+                    if client_id:
+                        client_response = supabase.table('clients').select('email').eq('id', client_id).limit(1).execute()
+                        if client_response.data:
+                            client_email = client_response.data[0].get('email')
+                            evaluation_logger.log_task_progress("API", f"Email del cliente encontrado: {client_email}")
+                            print(f"[API] Email encontrado para jd_interview {jd_interview_id}: {client_email}")
+                        else:
+                            evaluation_logger.log_task_progress("API", f"No se encontró email para client_id: {client_id}")
+                    else:
+                        evaluation_logger.log_task_progress("API", f"El jd_interview {jd_interview_id} no tiene client_id asociado")
+                else:
+                    evaluation_logger.log_task_progress("API", f"No se encontró jd_interview con ID: {jd_interview_id}")
+            except Exception as fetch_error:
+                evaluation_logger.log_error("API", f"Error obteniendo email del cliente: {str(fetch_error)}")
+
+        if client_email:
+            os.environ["REPORT_TO_EMAIL"] = client_email
+            email_override_set = True
+            evaluation_logger.log_task_progress("API", f"Email del cliente seteado para envío de reporte: {client_email}")
+
         try:
-            result_json = json.loads(str(result))
-            with open(filename, 'w', encoding='utf-8') as f:
-                json.dump(result_json, f, indent=2, ensure_ascii=False)
-        except json.JSONDecodeError:
-            filename = filename.replace('.json', '.txt')
-            with open(filename, 'w', encoding='utf-8') as f:
-                f.write(str(result))
-        
-        # Calcular tiempo de ejecución
-        end_time = datetime.now()
-        execution_time = str(end_time - start_time)
-        
-        evaluation_logger.log_task_complete("API", f"Proceso completado en {execution_time}")
-        
-        try:
-            # Si es un CrewOutput, extraer su contenido
-            if hasattr(result, 'raw'):
-                try:
-                    # Intentar parsear el raw como JSON
-                    result_dict = json.loads(result.raw)
-                except json.JSONDecodeError:
-                    # Si no es JSON válido, crear un dict con el contenido raw
-                    result_dict = {"raw_result": result.raw}
+            # Crear y ejecutar crew (filtrado o completo)
+            if jd_interview_id:
+                crew = create_filtered_data_processing_crew(jd_interview_id)
             else:
-                # Si no es CrewOutput, intentar convertir a dict
-                try:
-                    result_dict = json.loads(str(result))
-                except json.JSONDecodeError:
-                    result_dict = {"raw_result": str(result)}
-        except Exception:
-            # Fallback en caso de cualquier error
-            result_dict = {"raw_result": str(result)}
+                crew = create_data_processing_crew()
 
         return AnalysisResponse(
             status="success",
@@ -356,6 +364,11 @@ async def read_cv(request: CVRequest):
         
         # Crear y ejecutar crew
         crew = create_cv_analysis_crew(request.filename)
+        
+        print("=" * 80)
+        print("🚀 INICIANDO EJECUCIÓN DEL CREW (CV Analysis)")
+        print("=" * 80)
+        
         result = crew.kickoff()
         
         # Calcular tiempo de ejecución
@@ -687,6 +700,11 @@ async def evaluate_single_meet(request: SingleMeetRequest):
         # Crear y ejecutar crew de evaluación individual        
         #COMENTADO PARA PROBAR CON DATOS MOCKEADOS
         crew = create_single_meet_evaluation_crew(meet_id)
+        
+        print("=" * 80)
+        print("🚀 INICIANDO EJECUCIÓN DEL CREW (Single Meet Evaluation)")
+        print("=" * 80)
+        
         result = crew.kickoff()
         
         #RECORDAR DESCOMENTAR LA LINEA QUE HACE EL FULL_RESULT = RESULT

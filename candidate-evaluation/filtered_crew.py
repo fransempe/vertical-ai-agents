@@ -57,7 +57,7 @@ def create_filtered_data_processing_crew(jd_interview_id: str):
         agents=[data_extractor, conversation_analyzer, job_analyzer, data_processor, saver_agent, email_sender],
         tasks=[extraction_task, analysis_task, job_analysis_task, comparison_task, processing_task, saving_task, email_task],
         process=Process.sequential,
-        verbose=True
+        verbose=False
     )
     
     return crew
