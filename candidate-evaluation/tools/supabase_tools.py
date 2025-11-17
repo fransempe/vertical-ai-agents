@@ -491,6 +491,59 @@ def get_jd_interviews_data(jd_interview_id: str = None) -> str:
         return json.dumps({"error": error_msg, "type": type(e).__name__}, indent=2)
 
 @tool
+def get_client_email(client_id: str) -> str:
+    """
+    Obtiene el email del cliente desde la tabla clients usando el client_id.
+    
+    Args:
+        client_id: ID del cliente (UUID)
+        
+    Returns:
+        JSON string con el email del cliente o error si no se encuentra
+    """
+    try:
+        evaluation_logger.log_task_start("Obtener Email del Cliente", f"Buscando email para client_id: {client_id}")
+        
+        url = os.getenv("SUPABASE_URL")
+        key = os.getenv("SUPABASE_KEY")
+        
+        if not url or not key:
+            error_msg = "SUPABASE_URL o SUPABASE_KEY no configurados"
+            evaluation_logger.log_error("Obtener Email del Cliente", error_msg)
+            return json.dumps({"error": error_msg}, indent=2)
+        
+        supabase = create_client(url, key)
+        
+        # Buscar cliente por ID
+        response = supabase.table('clients').select('id, email, name').eq('id', client_id).limit(1).execute()
+        
+        if not response.data or len(response.data) == 0:
+            error_msg = f"No se encontró cliente con ID: {client_id}"
+            evaluation_logger.log_error("Obtener Email del Cliente", error_msg)
+            return json.dumps({"error": error_msg}, indent=2)
+        
+        client_data = response.data[0]
+        email = client_data.get('email')
+        
+        if not email:
+            error_msg = f"El cliente {client_id} no tiene email configurado"
+            evaluation_logger.log_error("Obtener Email del Cliente", error_msg)
+            return json.dumps({"error": error_msg}, indent=2)
+        
+        result = {
+            "client_id": client_id,
+            "email": email,
+            "name": client_data.get('name', 'N/A')
+        }
+        
+        evaluation_logger.log_task_complete("Obtener Email del Cliente", f"Email encontrado: {email}")
+        return json.dumps(result, indent=2, ensure_ascii=False)
+        
+    except Exception as e:
+        evaluation_logger.log_error("Obtener Email del Cliente", f"Error obteniendo email: {str(e)}")
+        return json.dumps({"error": f"Error obteniendo email del cliente: {str(e)}"}, indent=2)
+
+@tool
 def get_current_date() -> str:
     """
     Obtiene la fecha actual del sistema en formato DD/MM/YYYY para usar en el asunto del email.
@@ -567,30 +620,6 @@ def get_conversations_by_jd_interview(jd_interview_id: str, limit: int = 100) ->
         
         # 2. Buscar meets que tengan jd_interviews_id = jd_interview_id
         meets_response = supabase.table('meets').select('*').eq('jd_interviews_id', jd_interview_id).execute()
-        
-        conversations = []
-        for row in conversations_response.data or []:
-            candidate_data = row.get('candidates') or {}
-            conversation = {
-                "conversation_id": row.get('id'),
-                "meet_id": row.get('meet_id'),
-                "candidate_id": row.get('candidate_id'),
-                "conversation_data": row.get('conversation_data'),
-                "candidate": {
-                    "id": candidate_data.get('id'),
-                    "name": candidate_data.get('name'),
-                    "email": candidate_data.get('email'),
-                    "phone": candidate_data.get('phone'),
-                    "cv_url": candidate_data.get('cv_url'),
-                    "tech_stack": candidate_data.get('tech_stack')
-                },
-                "jd_interview_id": jd_interview_id,
-                "jd_interview_name": jd_interview.get('interview_name'),
-                "jd_interview_agent_id": jd_interview.get('agent_id'),
-                "client": client_data,
-                "conversations": [],
-                "total_conversations": 0
-            }, indent=2, ensure_ascii=False)
         
         meet_ids = [meet['id'] for meet in meets_response.data]
         evaluation_logger.log_task_progress("Obtener Conversaciones por JD Interview", f"Encontrados {len(meet_ids)} meets")

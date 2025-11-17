@@ -308,6 +308,10 @@ async def trigger_analysis(request: AnalysisRequest = None):
             except Exception as fetch_error:
                 evaluation_logger.log_error("API", f"Error obteniendo email del cliente: {str(fetch_error)}")
 
+        # Guardar email original si existe
+        original_email = os.getenv("REPORT_TO_EMAIL")
+        email_override_set = False
+        
         if client_email:
             os.environ["REPORT_TO_EMAIL"] = client_email
             email_override_set = True
@@ -319,16 +323,68 @@ async def trigger_analysis(request: AnalysisRequest = None):
                 crew = create_filtered_data_processing_crew(jd_interview_id)
             else:
                 crew = create_data_processing_crew()
-
-        return AnalysisResponse(
-            status="success",
-            message="Análisis completado exitosamente",
-            timestamp=start_time.strftime('%Y-%m-%d %H:%M:%S'),
-            execution_time=execution_time,
-            results_file=filename,
-            result=result_dict,
-            jd_interview_id=jd_interview_id
-        )
+            
+            print("=" * 80)
+            print("🚀 INICIANDO EJECUCIÓN DEL CREW (Data Processing)")
+            print("=" * 80)
+            
+            result = crew.kickoff()
+            
+            # Calcular tiempo de ejecución
+            end_time = datetime.now()
+            execution_time = str(end_time - start_time)
+            
+            evaluation_logger.log_task_complete("API", f"Análisis completado en {execution_time}")
+            
+            # Procesar resultado
+            result_text = str(result)
+            if hasattr(result, 'raw'):
+                result_text = result.raw
+            
+            # Intentar parsear el resultado como JSON
+            result_dict = None
+            try:
+                result_dict = json.loads(result_text)
+            except json.JSONDecodeError:
+                # Intentar extraer JSON del texto usando regex
+                json_match = re.search(r'\{.*\}', result_text, re.DOTALL)
+                if json_match:
+                    try:
+                        result_dict = json.loads(json_match.group(0))
+                    except json.JSONDecodeError:
+                        result_dict = {"raw_result": result_text[:1000]}
+                else:
+                    result_dict = {"raw_result": result_text[:1000]}
+            
+            # Generar filename con timestamp
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"analysis_results_{timestamp}.json"
+            
+            # Guardar resultado en archivo
+            try:
+                with open(filename, 'w', encoding='utf-8') as f:
+                    json.dump(result_dict, f, indent=2, ensure_ascii=False)
+            except Exception as file_error:
+                evaluation_logger.log_error("API", f"Error guardando resultado en archivo: {str(file_error)}")
+                filename = None
+            
+            return AnalysisResponse(
+                status="success",
+                message="Análisis completado exitosamente",
+                timestamp=start_time.strftime('%Y-%m-%d %H:%M:%S'),
+                execution_time=execution_time,
+                results_file=filename,
+                result=result_dict,
+                jd_interview_id=jd_interview_id
+            )
+        finally:
+            # Restaurar email original si se cambió
+            if email_override_set:
+                if original_email:
+                    os.environ["REPORT_TO_EMAIL"] = original_email
+                else:
+                    os.environ.pop("REPORT_TO_EMAIL", None)
+                evaluation_logger.log_task_progress("API", "Email original restaurado")
         
     except Exception as e:
         evaluation_logger.log_error("API", f"Error en análisis: {str(e)}")
