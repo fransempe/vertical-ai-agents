@@ -352,6 +352,7 @@ class GraphEmailMonitor:
     def extract_responsible(self, content: str, subject: str) -> Optional[str]:
         """
         Extrae el responsable del contenido del email.
+        Prioriza el formato separado por guiones: "Responsable: Nombre -"
         
         Args:
             content: Contenido del email
@@ -362,6 +363,24 @@ class GraphEmailMonitor:
         """
         import re
         
+        text_to_search = f"{content} {subject}"
+        
+        # PRIMERO: Buscar formato con guiones (ej: "Responsable: Francisco Sempé -")
+        dash_patterns = [
+            r'Responsable:\s*([^-]+?)\s*-',
+            r'RESPONSABLE:\s*([^-]+?)\s*-',
+        ]
+        
+        for pattern in dash_patterns:
+            match = re.search(pattern, text_to_search, re.IGNORECASE)
+            if match:
+                responsible = match.group(1).strip()
+                # Limpiar (remover caracteres especiales excepto espacios, guiones y puntos)
+                responsible = re.sub(r'[^\w\s\-\.]', '', responsible)
+                if responsible and len(responsible) > 2:
+                    return responsible
+        
+        # SEGUNDO: Patrones tradicionales (sin guiones)
         patterns = [
             r'RESPONSABLE:\s*([^\n\r]+)',
             r'Responsable:\s*([^\n\r]+)',
@@ -373,7 +392,6 @@ class GraphEmailMonitor:
             r'Contacto\s*:\s*([^\n\r]+)',
         ]
         
-        text_to_search = f"{content} {subject}"
         for pattern in patterns:
             match = re.search(pattern, text_to_search, re.IGNORECASE)
             if match:
@@ -388,6 +406,7 @@ class GraphEmailMonitor:
     def extract_phone(self, content: str, subject: str) -> Optional[str]:
         """
         Extrae el teléfono del contenido del email.
+        Prioriza el formato separado por guiones: "Teléfono: 2235369926 -"
         
         Args:
             content: Contenido del email
@@ -398,6 +417,35 @@ class GraphEmailMonitor:
         """
         import re
         
+        text_to_search = f"{content} {subject}"
+        
+        # PRIMERO: Buscar formato con guiones (ej: "Teléfono: 2235369926 -")
+        dash_patterns = [
+            r'Tel[ée]fono:\s*([^-]+?)\s*-',
+            r'TEL[EÉ]FONO:\s*([^-]+?)\s*-',
+            r'Phone:\s*([^-]+?)\s*-',
+            r'PHONE:\s*([^-]+?)\s*-',
+            r'Tel:\s*([^-]+?)\s*-',
+            r'TEL:\s*([^-]+?)\s*-',
+        ]
+        
+        # Patrón general para números de teléfono
+        phone_pattern = r'[\+]?[(]?[0-9]{1,4}[)]?[-\s\.]?[(]?[0-9]{1,4}[)]?[-\s\.]?[0-9]{1,4}[-\s\.]?[0-9]{1,9}'
+        
+        for pattern in dash_patterns:
+            match = re.search(pattern, text_to_search, re.IGNORECASE)
+            if match:
+                phone = match.group(1).strip()
+                # Limpiar y extraer solo números/teléfono válido
+                phone_match = re.search(phone_pattern, phone)
+                if phone_match:
+                    return phone_match.group(0).strip()
+                # Si no encuentra patrón de teléfono pero hay números, devolverlos limpios
+                phone_clean = re.sub(r'[^\d\+\(\)\-\s]', '', phone).strip()
+                if phone_clean and len(phone_clean) >= 7:  # Mínimo 7 dígitos para ser un teléfono válido
+                    return phone_clean
+        
+        # SEGUNDO: Patrones tradicionales (sin guiones)
         patterns = [
             r'TEL[EÉ]FONO:\s*([^\n\r]+)',
             r'Tel[ée]fono:\s*([^\n\r]+)',
@@ -407,12 +455,7 @@ class GraphEmailMonitor:
             r'Tel:\s*([^\n\r]+)',
         ]
         
-        # Patrón general para números de teléfono
-        phone_pattern = r'[\+]?[(]?[0-9]{1,4}[)]?[-\s\.]?[(]?[0-9]{1,4}[)]?[-\s\.]?[0-9]{1,4}[-\s\.]?[0-9]{1,9}'
-        
-        text_to_search = f"{content} {subject}"
-        
-        # Buscar con patrones específicos primero
+        # Buscar con patrones específicos
         for pattern in patterns:
             match = re.search(pattern, text_to_search, re.IGNORECASE)
             if match:
@@ -429,7 +472,7 @@ class GraphEmailMonitor:
         
         return None
 
-    def insert_jd_interview(self, interview_name: str, agent_id: str, job_description: str, content: str = "", subject: str = "") -> Optional[Dict[str, Any]]:
+    def insert_jd_interview(self, interview_name: str, agent_id: str, job_description: str, client_id: str = None, content: str = "", subject: str = "") -> Optional[Dict[str, Any]]:
         """
         Inserta un nuevo registro en la tabla jd_interviews
         
@@ -437,6 +480,7 @@ class GraphEmailMonitor:
             interview_name: Nombre de la entrevista
             agent_id: ID del agente asignado
             job_description: Descripción del trabajo o contenido del email
+            client_id: ID del cliente (opcional, pero recomendado)
             content: Contenido completo del email (opcional, para extraer datos del cliente)
             subject: Asunto del email (opcional, para extraer datos del cliente)
             
@@ -450,9 +494,12 @@ class GraphEmailMonitor:
             data = {
                 "interview_name": interview_name,
                 "agent_id": agent_id,
-                "job_description": job_description,
-                "client_id": client_id
+                "job_description": job_description
             }
+            
+            # Agregar client_id solo si se proporciona
+            if client_id:
+                data["client_id"] = client_id
             
             response = self.supabase.table('jd_interviews').insert(data).execute()
             
@@ -897,6 +944,18 @@ class GraphEmailMonitor:
                 print(f"   - Description: {matched_agent.get('description', 'N/A')}")
                 print(f"   - Status: {matched_agent.get('status', 'N/A')}")
                 
+                # Verificar/crear cliente antes de insertar la entrevista
+                print("\n👤 VERIFICANDO/CREANDO CLIENTE:")
+                print("=" * 80)
+                clean_email = self.extract_clean_email(sender)
+                client_id = self.get_or_create_client(clean_email, content, subject)
+                
+                if client_id:
+                    print(f"✅ Cliente verificado/creado - Client ID: {client_id}")
+                else:
+                    print(f"⚠️ No se pudo obtener/crear cliente para email: {clean_email}")
+                    evaluation_logger.log_error("Procesamiento Email", f"No se pudo obtener/crear cliente para email: {clean_email}")
+                
                 # Insertar en la tabla jd_interviews
                 interview_name = self.generate_interview_name(subject, content, sender)
                 agent_id = matched_agent.get('agent_id')
@@ -905,6 +964,7 @@ class GraphEmailMonitor:
                     interview_name=interview_name,
                     agent_id=agent_id,
                     job_description=content,
+                    client_id=client_id,
                     content=content,
                     subject=subject
                 )
@@ -1088,6 +1148,7 @@ class GraphEmailMonitor:
     def extract_client_name(self, content: str, subject: str) -> str:
         """
         Extrae el nombre del cliente del contenido del email.
+        Prioriza el formato separado por guiones: "Cliente: Nombre -"
         
         Args:
             content: Contenido del email
@@ -1098,7 +1159,24 @@ class GraphEmailMonitor:
         """
         import re
         
-        # Patrones para buscar el nombre del cliente
+        text_to_search = f"{content} {subject}"
+        
+        # PRIMERO: Buscar formato con guiones (ej: "Cliente: FransempeSA -")
+        dash_patterns = [
+            r'Cliente:\s*([^-]+?)\s*-',
+            r'CLIENTE:\s*([^-]+?)\s*-',
+        ]
+        
+        for pattern in dash_patterns:
+            match = re.search(pattern, text_to_search, re.IGNORECASE)
+            if match:
+                client_name = match.group(1).strip()
+                # Limpiar el nombre del cliente (remover caracteres especiales excepto espacios y guiones)
+                client_name = re.sub(r'[^\w\s\-&]', '', client_name)
+                if client_name and len(client_name) > 2:
+                    return client_name
+        
+        # SEGUNDO: Patrones tradicionales (sin guiones)
         patterns = [
             r'CLIENTE:\s*([^\n\r]+)',
             r'Cliente:\s*([^\n\r]+)',
@@ -1231,19 +1309,22 @@ class GraphEmailMonitor:
         import re
         
         try:
-            # Si ya es un email simple, devolverlo
-            if '@' in email_source and not email_source.startswith('=?'):
-                return email_source.strip()
-            
-            # Buscar email entre < >
+            # Primero buscar email entre < > (formato: "Nombre <email@domain.com>" o "=?UTF-8?Q?Name?= <email@domain.com>")
             email_match = re.search(r'<([^>]+@[^>]+)>', email_source)
             if email_match:
                 return email_match.group(1).strip()
             
-            # Buscar email al final de la cadena
+            # Si no hay < >, buscar email simple (formato: "email@domain.com")
+            # Solo si no contiene espacios y es un email válido
             email_match = re.search(r'([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})', email_source)
             if email_match:
-                return email_match.group(1).strip()
+                # Verificar que no haya espacios antes o después (para evitar tomar parte de un nombre)
+                matched_email = email_match.group(1).strip()
+                # Si el email coincide con todo el string (o es el único email), devolverlo
+                if matched_email == email_source.strip() or ' ' not in email_source:
+                    return matched_email
+                # Si hay espacios, solo devolver si el email está al final o es el único match
+                return matched_email
             
             # Si no se encuentra, devolver la cadena original
             return email_source.strip()

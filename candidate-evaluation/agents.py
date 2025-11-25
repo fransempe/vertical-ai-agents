@@ -36,7 +36,7 @@ def create_data_extractor_agent():
         **TL;DR:** Sé conciso. Extrae solo datos necesarios. Evita explicaciones largas.""",
         tools=[extract_supabase_conversations],
         **common_agent_kwargs,
-        llm=FAST
+        llm=llm
     )
 
 def create_filtered_data_extractor_agent():
@@ -123,7 +123,7 @@ def create_job_description_analyzer_agent():
         **TL;DR:** Responde breve y directo. Solo análisis esencial, sin texto innecesario.""",
         tools=[get_jd_interviews_data],
         **common_agent_kwargs,
-        llm=FAST,
+        llm=llm,
     )
 
 def create_data_processor_agent():
@@ -140,7 +140,7 @@ def create_data_processor_agent():
         
         **TL;DR:** Combina datos eficientemente. Genera reportes concisos. Sin texto redundante.""",
         **common_agent_kwargs,
-        llm=FAST,
+        llm=llm,
     )
 
 def create_evaluation_saver_agent():
@@ -169,7 +169,7 @@ def create_evaluation_saver_agent():
         **TL;DR:** Extrae y guarda. Una llamada. Responde solo confirmación. Sin explicaciones largas.""",
         tools=[save_interview_evaluation, get_jd_interviews_data],
         **common_agent_kwargs,
-        llm=FAST
+        llm=llm
     )
 
 def create_email_sender_agent():
@@ -278,7 +278,7 @@ def create_candidate_matching_agent():
         **TL;DR:** Análisis conciso. Solo scores y matches esenciales. Sin texto innecesario.""",
         tools=[get_candidates_data, get_all_jd_interviews],
         **common_agent_kwargs,
-        llm=FAST,
+        llm=llm,
     )
 
 def create_single_meet_evaluator_agent():

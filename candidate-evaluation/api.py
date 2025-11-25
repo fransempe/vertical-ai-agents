@@ -654,7 +654,7 @@ async def outlook_webhook(request: Request):
     # Notificación real de email
     try:
         data = await request.json()
-        print("data: ", data)
+        
         _events = len(data.get('value', [])) if isinstance(data, dict) else 0
         print(f"📧 Notificación recibida - {_events} evento(s)")
         
