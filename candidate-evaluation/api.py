@@ -235,7 +235,7 @@ class CVAnalysisResponse(BaseModel):
     candidate_data: dict = None
     candidate_created: bool | None = None
     candidate_error: str | None = None
-    candidate_result: dict = None
+    candidate_result: dict | None = None
     candidate_status: str | None = None
 
 class MatchingResponse(BaseModel):

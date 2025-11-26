@@ -667,8 +667,8 @@ def create_matching_task(agent):
         
         1. 📋 **Obtener Datos de Candidatos:**
            - Usar get_candidates_data() para obtener todos los candidatos
-           - Extraer el campo tech_stack de cada candidato
-           - Obtener información básica (id, name, email, phone, cv_url)
+           - Extraer el campo tech_stack de cada candidato que es un array de strings
+           - Obtener información básica (id, name, email, phone, tech_stack, cv_url)
         
         2. 📋 **Obtener Datos de Entrevistas:**
            - Usar get_all_jd_interviews() para obtener TODAS las entrevistas
@@ -676,24 +676,24 @@ def create_matching_task(agent):
            - Obtener información del agente asignado (agent_id)
         
         3. 🔍 **Análisis de Compatibilidad:**
-           Para cada candidato, analizar contra cada entrevista:
-           - Comparar tech_stack del candidato con job_description de la entrevista
-           - Identificar tecnologías exactas mencionadas en ambos
-           - Identificar tecnologías relacionadas o complementarias
-           - Detectar gaps importantes en el tech_stack del candidato
-           - Calcular score de compatibilidad (0-100%)
+           Para cada candidato vs cada entrevista:
+           - Comparar cada tecnología del tech_stack (array) con el job_description (texto)
+           - Buscar coincidencias case-insensitive y considerar variaciones (React=ReactJS, JavaScript=JS, Node.js=NodeJS)
+           - Si hay al menos UNA coincidencia, calcular score > 0
+           - Si NO hay coincidencias, score = 0 (no incluir en resultado)
         
         4. 📊 **Criterios de Evaluación:**
-           - **Coincidencias Exactas (peso 40%):** Tecnologías que aparecen exactamente en ambos
-           - **Coincidencias Relacionadas (peso 30%):** Frameworks, librerías o herramientas relacionadas
-           - **Tecnologías Complementarias (peso 20%):** Skills que complementan el stack requerido
-           - **Gaps Críticos (peso -10%):** Tecnologías esenciales que faltan en el candidato
+           - Coincidencias exactas: 40% (tech_stack aparece en job_description)
+           - Coincidencias relacionadas: 30% (frameworks/herramientas relacionadas)
+           - Tecnologías complementarias: 20% (skills del JD que complementan)
+           - Gaps críticos: -10% (tecnologías esenciales del JD que faltan)
+           - Score mínimo: 10% si hay al menos una coincidencia
         
         5. 🎯 **Generar Resultados SIMPLIFICADOS:**
-           - SOLO mostrar candidatos que tengan matches (score > 0)
+           - SOLO mostrar candidatos que tengan matches (score > 0) ordenados por score de mayor a menor
            - Para cada candidato con matches, incluir:
              * Datos completos del candidato (id, name, email, phone, cv_url, tech_stack)
-             * Lista de entrevistas que coinciden con sus datos
+             * Lista de entrevistas que coinciden con sus datos ordenadas por score de compatibilidad de mayor a menor
              * Para cada entrevista: registro completo de jd_interviews (id, interview_name, agent_id, job_description, client_id, created_at) + score de compatibilidad + análisis del match
         
         6. 📝 **Formato de Salida SIMPLIFICADO:**

@@ -941,17 +941,40 @@ def save_meet_evaluation(full_result: str) -> str:
 
 
 @tool
-def get_candidates_data(limit: int = 100) -> str:
+def get_candidates_data(limit: int | dict | None = 100) -> str:
     """
     Obtiene datos de candidatos desde la tabla 'candidates' incluyendo tech_stack.
     
     Args:
-        limit: Número máximo de candidatos a extraer
+        limit: Número máximo de candidatos a extraer. Puede venir como int o como dict
+               generado por el esquema de tools; en ese caso se normaliza internamente.
         
     Returns:
         JSON string con los datos de candidatos
     """
     try:
+        # Normalizar parámetro limit por posibles formatos de tool schema
+        if isinstance(limit, dict):
+            # Intentar extraer algún valor razonable del dict, si existiera
+            possible = (
+                limit.get("default")
+                or limit.get("value")
+                or limit.get("limit")
+                or limit.get("max")
+            )
+            try:
+                limit = int(possible) if possible is not None else 100
+            except (TypeError, ValueError):
+                limit = 100
+        elif limit is None:
+            limit = 100
+        else:
+            # Forzar a int por si vino como string u otro tipo convertible
+            try:
+                limit = int(limit)
+            except (TypeError, ValueError):
+                limit = 100
+
         evaluation_logger.log_task_start("Obtener Candidatos", "Candidates Data Extractor")
         
         url = os.getenv("SUPABASE_URL")

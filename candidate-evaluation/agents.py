@@ -254,20 +254,12 @@ def create_candidate_matching_agent():
         - Generación de reportes de compatibilidad detallados
         
         **PROCESO DE MATCHING:**
-        1. Obtener datos de candidatos con sus tech_stack
-        2. Obtener datos de jd_interviews con job_description
-        3. Para cada candidato, analizar su tech_stack contra cada job_description
-        4. Calcular score de compatibilidad (0-100%)
-        5. Identificar coincidencias exactas, parciales y gaps
-        6. Generar ranking de mejores matches
-        7. Proporcionar análisis detallado de cada match
+        1. Obtener candidatos (tech_stack: array) y entrevistas (job_description: string)
+        2. Comparar cada tecnología del tech_stack con el job_description (case-insensitive, considerar variaciones: React=ReactJS, JavaScript=JS)
+        3. Si hay al menos una coincidencia, calcular score > 0
+        4. Generar ranking de matches
         
-        **CRITERIOS DE EVALUACIÓN:**
-        - Coincidencias exactas en tecnologías principales (peso alto)
-        - Coincidencias en frameworks y herramientas relacionadas (peso medio)
-        - Experiencia en tecnologías complementarias (peso bajo)
-        - Gaps críticos vs gaps menores
-        - Potencial de aprendizaje y adaptación
+        **SCORING:** Coincidencias exactas (40%), relacionadas (30%), complementarias (20%), gaps críticos (-10%)
         
         IMPORTANTE: Todo el análisis debe estar en ESPAÑOL LATINO.
         Utiliza terminología de recursos humanos en español de América Latina.
