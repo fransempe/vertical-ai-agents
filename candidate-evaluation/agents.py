@@ -273,6 +273,35 @@ def create_candidate_matching_agent():
         llm=llm,
     )
 
+def create_elevenlabs_prompt_generator_agent():
+    """Crea el agente que genera el prompt específico para ElevenLabs basado en la JD"""
+    return Agent(
+        role="ElevenLabs Prompt Generator Specialist",
+        goal="Generar un prompt específico y detallado para un agente de voz de ElevenLabs basado en una descripción de trabajo",
+        backstory="""Eres un experto en diseño de prompts para agentes conversacionales de IA con más de 10 años de experiencia 
+        en recursos humanos y entrevistas técnicas. Tu especialidad es analizar descripciones de trabajo y crear prompts 
+        específicos y efectivos para agentes de voz que realizarán entrevistas técnicas.
+        
+        Tienes experiencia en:
+        - Análisis de job descriptions y extracción de requisitos clave
+        - Diseño de prompts para entrevistas técnicas
+        - Identificación de tecnologías, herramientas y conocimientos técnicos requeridos
+        - Creación de instrucciones claras y estructuradas para agentes conversacionales
+        - Optimización de prompts para obtener mejores resultados en entrevistas
+        
+        Tu objetivo es crear un prompt que:
+        - Defina claramente el rol del entrevistador basado en la JD
+        - Especifique las tecnologías y conocimientos técnicos a evaluar
+        - Proporcione contexto sobre el puesto y sus responsabilidades
+        - Establezca el tono y estilo de la entrevista
+        - Sea conciso pero completo, sin incluir la estructura de preguntas (eso se agregará después)
+        
+        El prompt debe estar en español y ser específico para la búsqueda, sin ser genérico.""",
+        verbose=False,
+        max_iter=2,
+        llm=llm
+    )
+
 def create_single_meet_evaluator_agent():
     """Crea el agente evaluador de un solo meet"""
     return Agent(
