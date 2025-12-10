@@ -767,6 +767,77 @@ def create_single_meet_extraction_task(agent, meet_id: str):
         agent=agent
     )
 
+def create_elevenlabs_prompt_generation_task(agent, interview_name: str, job_description: str, sender_email: str):
+    """Tarea para generar el prompt específico de ElevenLabs basado en la JD y extraer datos del cliente"""
+    return Task(
+        description=f"""
+        Genera un prompt específico y detallado para un agente de voz de ElevenLabs que realizará entrevistas técnicas,
+        y extrae los datos del cliente desde la descripción del puesto.
+        
+        **CONTEXTO:**
+        - Nombre de la búsqueda: {interview_name}
+        - Descripción del puesto: {job_description}
+        - Email del remitente: {sender_email}
+        
+        **OBJETIVO:**
+        1. Crear un prompt que defina el rol del entrevistador técnico basado en la descripción del puesto.
+        2. Extraer datos del cliente desde la descripción del puesto.
+        
+        **INSTRUCCIONES PARA EL PROMPT:**
+        1. Analiza la descripción del puesto y extrae:
+           - Tecnologías principales requeridas
+           - Herramientas y frameworks mencionados
+           - Responsabilidades técnicas clave
+           - Nivel de experiencia esperado
+           - Conocimientos específicos necesarios
+        
+        2. Crea un prompt que:
+           - Defina el rol del entrevistador como un profesional técnico especializado en estas tecnologías
+           - Especifique qué conocimientos técnicos debe evaluar
+           - Proporcione contexto sobre el puesto y sus responsabilidades
+           - Establezca el tono profesional pero amigable
+           - Sea específico para esta búsqueda, no genérico
+        
+        3. El prompt debe:
+           - Estar en español
+           - Ser conciso pero completo
+           - NO incluir instrucciones sobre cantidad de preguntas (eso se agregará después)
+           - Enfocarse en definir el rol y contexto del entrevistador
+        
+        **INSTRUCCIONES PARA EXTRACCIÓN DE DATOS DEL CLIENTE:**
+        Extrae los siguientes datos del cliente desde la descripción del puesto (busca en el formato "Cliente: X - Responsable: Y - Teléfono: Z"):
+        - **nombre_cliente**: Nombre de la empresa/cliente (buscar después de "Cliente:" y antes del siguiente guion)
+        - **responsable**: Nombre del responsable (buscar después de "Responsable:" y antes del siguiente guion)
+        - **email**: Usar el email del remitente ({sender_email}) como email del cliente
+        - **telefono**: Teléfono del cliente (buscar después de "Teléfono:" y antes del siguiente guion, o buscar cualquier número de teléfono en el texto)
+        
+        **INSTRUCCIONES PARA GENERAR NOMBRE DEL AGENTE:**
+        Genera el nombre del agente de ElevenLabs en el formato: "Nombre del Cliente - Búsqueda solicitada"
+        - Extrae el nombre del cliente desde la descripción del puesto
+        - Extrae la tecnología o búsqueda principal mencionada en la descripción del puesto
+        - Formato: "{{nombre_cliente}} - Búsqueda {{tecnologia}}"
+        - Ejemplo: "Technova SA - Búsqueda ReactJS"
+        - Si no encuentras nombre del cliente, usa el dominio del email del remitente
+        - Si no encuentras tecnología específica, usa "Desarrollador" como búsqueda
+        
+        **FORMATO DE SALIDA (JSON):**
+        {{
+            "prompt": "Actúa como un entrevistador técnico...",
+            "cliente": {{
+                "nombre": "Nombre del Cliente",
+                "responsable": "Nombre del Responsable",
+                "email": "{sender_email}",
+                "telefono": "1234567890"
+            }},
+            "agent_name": "Nombre del Cliente - Búsqueda Tecnología"
+        }}
+        
+        Si no encuentras algún dato, usa null o una cadena vacía.
+        """,
+        expected_output="JSON con tres campos: 'prompt' (texto del prompt), 'cliente' (objeto con nombre, responsable, email, telefono) y 'agent_name' (nombre del agente en formato 'Cliente - Búsqueda')",
+        agent=agent
+    )
+
 def create_single_meet_evaluation_task(agent, extraction_task):
     """Tarea de evaluación completa de un solo meet"""
     return Task(

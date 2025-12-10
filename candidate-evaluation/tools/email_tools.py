@@ -12,6 +12,7 @@ import re
 import html
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from utils.logger import evaluation_logger
+from tools.elevenlabs_tools import create_elevenlabs_agent
 
 load_dotenv()
 
@@ -296,14 +297,15 @@ class GraphEmailMonitor:
             evaluation_logger.log_error("Matching Email-Agent", f"Error haciendo match: {str(e)}")
             return None
 
-    def get_or_create_client(self, email: str, content: str = "", subject: str = "") -> Optional[str]:
+    def get_or_create_client(self, email: str, name: str = None, responsible: str = None, phone: str = None) -> Optional[str]:
         """
-        Busca un cliente por email. Si no existe, lo crea.
+        Busca un cliente por email. Si no existe, lo crea con los datos proporcionados.
         
         Args:
-            email: Email del cliente (from del email)
-            content: Contenido del email para extraer datos adicionales
-            subject: Asunto del email para extraer datos adicionales
+            email: Email del cliente
+            name: Nombre del cliente (opcional)
+            responsible: Responsable del cliente (opcional)
+            phone: Teléfono del cliente (opcional)
             
         Returns:
             ID del cliente (existente o creado), o None si falla
@@ -322,16 +324,14 @@ class GraphEmailMonitor:
             # Cliente no existe, crear uno nuevo
             evaluation_logger.log_task_progress("Buscar/Crear Cliente", "Cliente no encontrado, creando nuevo...")
             
-            # Extraer datos del cliente del contenido
-            client_name = self.extract_client_name(content, subject) or email.split('@')[0]  # Fallback al dominio si no se encuentra
-            client_responsible = self.extract_responsible(content, subject)
-            client_phone = self.extract_phone(content, subject)
+            # Usar datos proporcionados o valores por defecto
+            client_name = name or email.split('@')[0]  # Fallback al dominio si no se encuentra
             
             client_data = {
                 "email": email,
                 "name": client_name,
-                "responsible": client_responsible if client_responsible else None,
-                "phone": client_phone if client_phone else None
+                "responsible": responsible if responsible else None,
+                "phone": phone if phone else None
             }
             
             # Insertar nuevo cliente
@@ -472,13 +472,13 @@ class GraphEmailMonitor:
         
         return None
 
-    def insert_jd_interview(self, interview_name: str, agent_id: str, job_description: str, client_id: str = None, content: str = "", subject: str = "") -> Optional[Dict[str, Any]]:
+    def insert_jd_interview(self, interview_name: str, agent_id: str = None, job_description: str = "", client_id: str = None, content: str = "", subject: str = "") -> Optional[Dict[str, Any]]:
         """
         Inserta un nuevo registro en la tabla jd_interviews
         
         Args:
             interview_name: Nombre de la entrevista
-            agent_id: ID del agente asignado
+            agent_id: ID del agente asignado (opcional, ya no se usa desde la BD)
             job_description: Descripción del trabajo o contenido del email
             client_id: ID del cliente (opcional, pero recomendado)
             content: Contenido completo del email (opcional, para extraer datos del cliente)
@@ -490,12 +490,15 @@ class GraphEmailMonitor:
         try:
             evaluation_logger.log_task_start("Insert JD Interview", "Insertando registro en jd_interviews")
             
-            # Crear jd_interview con client_id
+            # Crear jd_interview con client_id (agent_id ya no es necesario)
             data = {
                 "interview_name": interview_name,
-                "agent_id": agent_id,
                 "job_description": job_description
             }
+            
+            # Agregar agent_id solo si se proporciona (para compatibilidad)
+            if agent_id:
+                data["agent_id"] = agent_id
             
             # Agregar client_id solo si se proporciona
             if client_id:
@@ -718,7 +721,7 @@ class GraphEmailMonitor:
 
             subject, body = self.format_status_overview_email(jd_interview_id, overview)
 
-            email_api_url = os.getenv("EMAIL_API_URL", "http://127.0.0.1:8004/send-simple-email")
+            email_api_url = os.getenv("EMAIL_API_URL")
             payload = {
                 "to_email": to_email,
                 "subject": subject,
@@ -931,107 +934,138 @@ class GraphEmailMonitor:
             print(content)
             print("=" * 80)
             
-            # Matchear con agente
-            matched_agent = self.match_email_to_agent(subject, content)
+            # Extraer email limpio del remitente
+            clean_email = self.extract_clean_email(sender)
             
-            print("\n🤖 RESULTADO DEL MATCHING CON AGENTE:")
+            # Generar nombre de la entrevista (temporal, se ajustará después)
+            interview_name = self.generate_interview_name(subject, content, sender)
+            
+            # Crear agente de voz en ElevenLabs para obtener el agent_id, datos del cliente y nombre del agente
+            print("\n🤖 CREANDO AGENTE DE VOZ EN ELEVENLABS Y EXTRAYENDO DATOS DEL CLIENTE:")
             print("=" * 80)
-            if matched_agent:
-                print(f"✅ AGENTE ENCONTRADO:")
-                print(f"   - Agent ID: {matched_agent.get('agent_id', 'N/A')}")
-                print(f"   - Name: {matched_agent.get('name', 'N/A')}")
-                print(f"   - Tech Stack: {matched_agent.get('tech_stack', 'N/A')}")
-                print(f"   - Description: {matched_agent.get('description', 'N/A')}")
-                print(f"   - Status: {matched_agent.get('status', 'N/A')}")
+            # El nombre del agente será generado por el agente de CrewAI, usar temporal por ahora
+            agent_name_temp = f"Agente {interview_name}"
+            elevenlabs_result = create_elevenlabs_agent(
+                agent_name=agent_name_temp,
+                interview_name=interview_name,
+                job_description=content,
+                sender_email=clean_email
+            )
+            
+            # Extraer datos del cliente, agent_id y nombre del agente del resultado
+            cliente_data = {}
+            agent_id_elevenlabs = None
+            agent_name_elevenlabs = agent_name_temp  # Por defecto usar el temporal
+            
+            if elevenlabs_result:
+                if isinstance(elevenlabs_result, dict):
+                    # Extraer datos del cliente
+                    cliente_data = elevenlabs_result.get('cliente_data', {})
+                    
+                    # Intentar obtener el agent_id de diferentes campos posibles
+                    agent_id_elevenlabs = (
+                        elevenlabs_result.get('agent_id') or 
+                        elevenlabs_result.get('id') or 
+                        elevenlabs_result.get('agentId') or
+                        elevenlabs_result.get('_id')
+                    )
+                elif hasattr(elevenlabs_result, 'agent_id'):
+                    agent_id_elevenlabs = elevenlabs_result.agent_id
+                elif hasattr(elevenlabs_result, 'id'):
+                    agent_id_elevenlabs = elevenlabs_result.id
                 
-                # Verificar/crear cliente antes de insertar la entrevista
-                print("\n👤 VERIFICANDO/CREANDO CLIENTE:")
+                print(f"✅ AGENTE DE VOZ CREADO EXITOSAMENTE:")
+                print(f"   - Nombre: {agent_name_elevenlabs}")
+                if agent_id_elevenlabs:
+                    print(f"   - Agent ID: {agent_id_elevenlabs}")
+                print("=" * 80)
+            else:
+                print(f"⚠️ No se pudo crear el agente de voz en ElevenLabs")
+                print("=" * 80)
+            
+            # Si no se obtuvieron datos del cliente, usar valores por defecto
+            client_name = cliente_data.get('nombre') or clean_email.split('@')[0]
+            client_responsible = cliente_data.get('responsable') or None
+            client_phone = cliente_data.get('telefono') or None
+            client_email = cliente_data.get('email') or clean_email
+            
+            # El nombre del agente ya fue generado por el agente de CrewAI y usado en la creación
+            # Actualizar interview_name con el nombre del cliente si está disponible
+            if client_name and client_name != clean_email.split('@')[0]:
+                interview_name = self.generate_interview_name(subject, content, sender, client_name)
+            
+            # PRIMERO: Verificar/crear cliente con los datos extraídos para obtener el client_id
+            print("\n👤 VERIFICANDO/CREANDO CLIENTE (ANTES DE INSERTAR jd_interviews):")
+            print("=" * 80)
+            print(f"   - Nombre: {client_name}")
+            print(f"   - Responsable: {client_responsible or 'N/A'}")
+            print(f"   - Email: {client_email}")
+            print(f"   - Teléfono: {client_phone or 'N/A'}")
+            
+            client_id = self.get_or_create_client(
+                email=client_email,
+                name=client_name,
+                responsible=client_responsible,
+                phone=client_phone
+            )
+            
+            if not client_id:
+                print(f"❌ ERROR: No se pudo obtener/crear cliente para email: {client_email}")
+                evaluation_logger.log_error("Procesamiento Email", f"No se pudo obtener/crear cliente para email: {client_email}")
+                print("=" * 80)
+                return  # Salir si no se pudo crear el cliente
+            
+            print(f"✅ Cliente verificado/creado - Client ID: {client_id}")
+            print("=" * 80)
+            
+            # SEGUNDO: Insertar en la tabla jd_interviews con el agent_id de ElevenLabs y el client_id obtenido
+            inserted_record = self.insert_jd_interview(
+                interview_name=interview_name,
+                agent_id=agent_id_elevenlabs,  # Usar el agent_id de ElevenLabs
+                job_description=content,
+                client_id=client_id,
+                content=content,
+                subject=subject
+            )
+            
+            print("\n💾 RESULTADO DEL INSERT EN jd_interviews:")
+            print("=" * 80)
+            if inserted_record:
+                print(f"✅ REGISTRO INSERTADO EXITOSAMENTE:")
+                print(f"   - ID: {inserted_record.get('id', 'N/A')}")
+                print(f"   - Interview Name: {inserted_record.get('interview_name', 'N/A')}")
+                print(f"   - Agent ID: {inserted_record.get('agent_id', 'N/A')}")
+                print(f"   - Job Description: {inserted_record.get('job_description', 'N/A')[:100]}...")
+                print(f"   - Client ID: {inserted_record.get('client_id', 'N/A')}")
+                print(f"   - Created At: {inserted_record.get('created_at', 'N/A')}")
+                print("=" * 80)
+                
+                # Enviar email de confirmación al emisor
+                print("\n📧 ENVIANDO EMAIL DE CONFIRMACIÓN:")
                 print("=" * 80)
                 clean_email = self.extract_clean_email(sender)
-                client_id = self.get_or_create_client(clean_email, content, subject)
-                
-                if client_id:
-                    print(f"✅ Cliente verificado/creado - Client ID: {client_id}")
-                else:
-                    print(f"⚠️ No se pudo obtener/crear cliente para email: {clean_email}")
-                    evaluation_logger.log_error("Procesamiento Email", f"No se pudo obtener/crear cliente para email: {clean_email}")
-                
-                # Insertar en la tabla jd_interviews
-                interview_name = self.generate_interview_name(subject, content, sender)
-                agent_id = matched_agent.get('agent_id')
-                
-                inserted_record = self.insert_jd_interview(
+                email_sent = self.send_confirmation_email(
+                    to_email=clean_email,
                     interview_name=interview_name,
-                    agent_id=agent_id,
-                    job_description=content,
-                    client_id=client_id,
-                    content=content,
-                    subject=subject
+                    agent_name=agent_name_elevenlabs,
+                    agent_id=agent_id_elevenlabs or 'N/A',
+                    interview_id=inserted_record.get('id', 'N/A'),
+                    success=True
                 )
                 
-                print("\n💾 RESULTADO DEL INSERT EN jd_interviews:")
-                print("=" * 80)
-                if inserted_record:
-                    print(f"✅ REGISTRO INSERTADO EXITOSAMENTE:")
-                    print(f"   - ID: {inserted_record.get('id', 'N/A')}")
-                    print(f"   - Interview Name: {inserted_record.get('interview_name', 'N/A')}")
-                    print(f"   - Agent ID: {inserted_record.get('agent_id', 'N/A')}")
-                    print(f"   - Job Description: {inserted_record.get('job_description', 'N/A')[:100]}...")
-                    print(f"   - Client ID: {inserted_record.get('client_id', 'N/A')}")
-                    print(f"   - Created At: {inserted_record.get('created_at', 'N/A')}")
-                    
-                    # Enviar email de confirmación al emisor
-                    print("\n📧 ENVIANDO EMAIL DE CONFIRMACIÓN:")
-                    print("=" * 80)
-                    clean_email = self.extract_clean_email(sender)
-                    email_sent = self.send_confirmation_email(
-                        to_email=clean_email,
-                        interview_name=interview_name,
-                        agent_name=matched_agent.get('name', 'N/A'),
-                        agent_id=agent_id,
-                        interview_id=inserted_record.get('id', 'N/A'),
-                        success=True
-                    )
-                    
-                    if email_sent:
-                        print(f"✅ EMAIL DE CONFIRMACIÓN ENVIADO EXITOSAMENTE a {clean_email}")
-                    else:
-                        print(f"❌ ERROR ENVIANDO EMAIL DE CONFIRMACIÓN a {clean_email}")
-                    print("=" * 80)
-                    
+                if email_sent:
+                    print(f"✅ EMAIL DE CONFIRMACIÓN ENVIADO EXITOSAMENTE a {clean_email}")
                 else:
-                    print("❌ ERROR AL INSERTAR REGISTRO")
-                    
-                    # Enviar email de error al emisor
-                    print("\n📧 ENVIANDO EMAIL DE ERROR:")
-                    print("=" * 80)
-                    clean_email = self.extract_clean_email(sender)
-                    email_sent = self.send_confirmation_email(
-                        to_email=clean_email,
-                        interview_name=interview_name,
-                        agent_name=matched_agent.get('name', 'N/A'),
-                        agent_id=agent_id,
-                        interview_id='N/A',
-                        success=False
-                    )
-                    
-                    if email_sent:
-                        print(f"✅ EMAIL DE ERROR ENVIADO a {clean_email}")
-                    else:
-                        print(f"❌ ERROR ENVIANDO EMAIL DE ERROR a {clean_email}")
-                    print("=" * 80)
-                    
-                print("=" * 80 + "\n")
+                    print(f"❌ ERROR ENVIANDO EMAIL DE CONFIRMACIÓN a {clean_email}")
+                print("=" * 80)
                 
             else:
-                print("❌ NO SE ENCONTRÓ AGENTE MATCHING")
+                print("❌ ERROR AL INSERTAR REGISTRO")
                 
-                # Enviar email de error cuando no se encuentra agente
-                print("\n📧 ENVIANDO EMAIL DE ERROR (NO SE ENCONTRÓ AGENTE):")
+                # Enviar email de error al emisor
+                print("\n📧 ENVIANDO EMAIL DE ERROR:")
                 print("=" * 80)
                 clean_email = self.extract_clean_email(sender)
-                interview_name = self.generate_interview_name(subject, content, sender)
-                
                 email_sent = self.send_confirmation_email(
                     to_email=clean_email,
                     interview_name=interview_name,
@@ -1105,7 +1139,7 @@ class GraphEmailMonitor:
             return {"type": "jd"}
         return {"type": "other"}
 
-    def generate_interview_name(self, subject: str, content: str, sender: str) -> str:
+    def generate_interview_name(self, subject: str, content: str, sender: str, client_name: str = None) -> str:
         """
         Genera un nombre descriptivo para la entrevista basado en el cliente, tecnología y búsqueda.
         
@@ -1113,13 +1147,15 @@ class GraphEmailMonitor:
             subject: Asunto del email
             content: Contenido del email
             sender: Remitente del email
+            client_name: Nombre del cliente (opcional, si no se proporciona se extrae del contenido)
             
         Returns:
             Nombre descriptivo de la entrevista
         """
         try:
-            # Extraer nombre del cliente del contenido del email
-            client_name = self.extract_client_name(content, subject)
+            # Usar el nombre del cliente proporcionado o extraerlo del contenido
+            if not client_name:
+                client_name = self.extract_client_name(content, subject)
             
             # Extraer tecnología principal del contenido
             technology = self.extract_technology(content, subject)
@@ -1405,7 +1441,7 @@ Sistema de Evaluación de Candidatos
                 """
             
             # Enviar email usando la API de email directamente
-            email_api_url = os.getenv("EMAIL_API_URL", "http://127.0.0.1:8004/send-simple-email")
+            email_api_url = os.getenv("EMAIL_API_URL")
             
             payload = {
                 "to_email": to_email,  # Enviar al email del emisor original

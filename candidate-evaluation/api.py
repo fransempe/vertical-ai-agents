@@ -987,7 +987,7 @@ async def evaluate_single_meet(request: SingleMeetRequest):
                             )
                             
                             # Enviar email
-                            email_api_url = os.getenv("EMAIL_API_URL", "http://127.0.0.1:8004/send-simple-email")
+                            email_api_url = os.getenv("EMAIL_API_URL")
                             
                             payload = {
                                 "to_email": client_email,
