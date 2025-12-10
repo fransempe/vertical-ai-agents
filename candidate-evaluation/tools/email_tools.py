@@ -721,7 +721,7 @@ class GraphEmailMonitor:
 
             subject, body = self.format_status_overview_email(jd_interview_id, overview)
 
-            email_api_url = os.getenv("EMAIL_API_URL", "http://127.0.0.1:8004/send-simple-email")
+            email_api_url = os.getenv("EMAIL_API_URL")
             payload = {
                 "to_email": to_email,
                 "subject": subject,
@@ -1441,7 +1441,7 @@ Sistema de Evaluación de Candidatos
                 """
             
             # Enviar email usando la API de email directamente
-            email_api_url = os.getenv("EMAIL_API_URL", "http://127.0.0.1:8004/send-simple-email")
+            email_api_url = os.getenv("EMAIL_API_URL")
             
             payload = {
                 "to_email": to_email,  # Enviar al email del emisor original
