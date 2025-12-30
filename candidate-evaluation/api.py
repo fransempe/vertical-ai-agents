@@ -24,7 +24,8 @@ from utils.logger import evaluation_logger
 from supabase import create_client
 from tracking import TokenTracker
 from tools.token_estimator import estimate_cost, estimate_task_tokens, estimate_completion_tokens, breakdown_context_tokens
-from tools.supabase_tools import get_meet_evaluation_data, save_meet_evaluation
+from tools.supabase_tools import get_meet_evaluation_data, save_meet_evaluation, get_client_email
+from tools.elevenlabs_tools import create_elevenlabs_agent
 from agents import create_single_meet_evaluator_agent
 from tasks import create_single_meet_extraction_task, create_single_meet_evaluation_task
 
@@ -1111,6 +1112,17 @@ async def handle_outlook_notifications(payload: dict):
         print(f"❌ Error procesando notificaciones: {str(e)}")
         evaluation_logger.log_error("Handle Notifications", f"Error procesando notificaciones: {str(e)}")
 
+class CreateAgentRequest(BaseModel):
+    jd_interview_id: str
+
+class CreateAgentResponse(BaseModel):
+    status: str
+    message: str
+    timestamp: str
+    jd_interview_id: str | None = None
+    agent_id: str | None = None
+    agent_name: str | None = None
+
 class TokenEstimationResponse(BaseModel):
     status: str
     message: str
@@ -1327,6 +1339,177 @@ Tu objetivo: {evaluator_agent.goal}"""
         error_msg = f"Error al estimar tokens: {str(e)}"
         print(f"❌ {error_msg}")
         evaluation_logger.log_error("API", error_msg)
+        raise HTTPException(status_code=500, detail=error_msg)
+
+@app.post("/create-elevenlabs-agent", response_model=CreateAgentResponse)
+async def create_elevenlabs_agent_endpoint(request: CreateAgentRequest):
+    """
+    Endpoint que crea un agente de ElevenLabs basado en un jd_interview_id
+    y actualiza el registro en jd_interviews con el agent_id generado.
+    
+    Args:
+        request: Objeto con jd_interview_id del registro a procesar
+        
+    Returns:
+        Respuesta con el estado de la operación y el agent_id creado
+    """
+    try:
+        start_time = datetime.now()
+        jd_interview_id = request.jd_interview_id
+        
+        evaluation_logger.log_task_start("Crear Agente ElevenLabs", f"Creando agente para jd_interview_id: {jd_interview_id}")
+        
+        # Verificar variables de entorno
+        required_env_vars = ['SUPABASE_URL', 'SUPABASE_KEY', 'ELEVENLABS_API_KEY']
+        missing_vars = [var for var in required_env_vars if not os.getenv(var)]
+        
+        if missing_vars:
+            evaluation_logger.log_error("API", f"Variables de entorno faltantes: {missing_vars}")
+            raise HTTPException(
+                status_code=500, 
+                detail=f"Variables de entorno faltantes: {missing_vars}"
+            )
+        
+        # Conectar a Supabase
+        supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
+        
+        # 1. Obtener datos del jd_interview
+        print(f"📊 Obteniendo datos del jd_interview: {jd_interview_id}")
+        jd_response = supabase.table('jd_interviews').select('*').eq('id', jd_interview_id).limit(1).execute()
+        
+        if not jd_response.data or len(jd_response.data) == 0:
+            error_msg = f"No se encontró jd_interview con ID: {jd_interview_id}"
+            evaluation_logger.log_error("API", error_msg)
+            raise HTTPException(status_code=404, detail=error_msg)
+        
+        jd_data = jd_response.data[0]
+        job_description = jd_data.get('job_description', '')
+        interview_name = jd_data.get('interview_name', '')
+        client_id = jd_data.get('client_id')
+        
+        if not job_description:
+            error_msg = f"El jd_interview {jd_interview_id} no tiene job_description"
+            evaluation_logger.log_error("API", error_msg)
+            raise HTTPException(status_code=400, detail=error_msg)
+        
+        if not client_id:
+            error_msg = f"El jd_interview {jd_interview_id} no tiene client_id asociado"
+            evaluation_logger.log_error("API", error_msg)
+            raise HTTPException(status_code=400, detail=error_msg)
+        
+        # 2. Obtener email del cliente
+        print(f"📧 Obteniendo email del cliente: {client_id}")
+        # Acceder a la función subyacente del Tool
+        func_to_call = None
+        if hasattr(get_client_email, '__wrapped__'):
+            func_to_call = get_client_email.__wrapped__
+        elif hasattr(get_client_email, 'func'):
+            func_to_call = get_client_email.func
+        elif hasattr(get_client_email, '_func'):
+            func_to_call = get_client_email._func
+        else:
+            error_msg = "No se pudo acceder a la función get_client_email"
+            evaluation_logger.log_error("API", error_msg)
+            raise HTTPException(status_code=500, detail=error_msg)
+        
+        client_email_result = func_to_call(client_id)
+        client_email_data = json.loads(client_email_result) if isinstance(client_email_result, str) else client_email_result
+        
+        if 'error' in client_email_data:
+            error_msg = f"Error obteniendo email del cliente: {client_email_data.get('error')}"
+            evaluation_logger.log_error("API", error_msg)
+            raise HTTPException(status_code=400, detail=error_msg)
+        
+        sender_email = client_email_data.get('email', '')
+        if not sender_email:
+            error_msg = f"El cliente {client_id} no tiene email configurado"
+            evaluation_logger.log_error("API", error_msg)
+            raise HTTPException(status_code=400, detail=error_msg)
+        
+        # 3. Crear agente de ElevenLabs
+        print(f"🤖 Creando agente de ElevenLabs...")
+        print(f"   - Interview Name: {interview_name}")
+        print(f"   - Job Description: {job_description[:100]}...")
+        print(f"   - Sender Email: {sender_email}")
+        
+        # Generar nombre temporal del agente (se actualizará con el generado por CrewAI)
+        agent_name_temp = interview_name or f"Agente {jd_interview_id[:8]}"
+        
+        elevenlabs_result = create_elevenlabs_agent(
+            agent_name=agent_name_temp,
+            interview_name=interview_name,
+            job_description=job_description,
+            sender_email=sender_email
+        )
+        
+        if not elevenlabs_result:
+            error_msg = "No se pudo crear el agente de ElevenLabs"
+            evaluation_logger.log_error("API", error_msg)
+            raise HTTPException(status_code=500, detail=error_msg)
+        
+        # 4. Extraer agent_id del resultado
+        agent_id_elevenlabs = None
+        agent_name_final = agent_name_temp
+        
+        if isinstance(elevenlabs_result, dict):
+            # Intentar obtener el agent_id de diferentes campos posibles
+            agent_id_elevenlabs = (
+                elevenlabs_result.get('agent_id') or 
+                elevenlabs_result.get('id') or 
+                elevenlabs_result.get('agentId') or
+                elevenlabs_result.get('_id')
+            )
+            # Obtener nombre del agente si está disponible
+            agent_name_final = elevenlabs_result.get('name', agent_name_temp)
+        elif hasattr(elevenlabs_result, 'agent_id'):
+            agent_id_elevenlabs = elevenlabs_result.agent_id
+        elif hasattr(elevenlabs_result, 'id'):
+            agent_id_elevenlabs = elevenlabs_result.id
+        
+        if not agent_id_elevenlabs:
+            error_msg = "No se pudo extraer el agent_id del resultado de ElevenLabs"
+            evaluation_logger.log_error("API", error_msg)
+            raise HTTPException(status_code=500, detail=error_msg)
+        
+        print(f"✅ Agente creado exitosamente:")
+        print(f"   - Agent ID: {agent_id_elevenlabs}")
+        print(f"   - Agent Name: {agent_name_final}")
+        
+        # 5. Actualizar el registro en jd_interviews con el agent_id
+        print(f"💾 Actualizando jd_interviews con agent_id...")
+        update_data = {
+            'agent_id': str(agent_id_elevenlabs)
+        }
+        
+        update_response = supabase.table('jd_interviews').update(update_data).eq('id', jd_interview_id).execute()
+        
+        if not update_response.data:
+            error_msg = f"No se pudo actualizar el registro jd_interview {jd_interview_id}"
+            evaluation_logger.log_error("API", error_msg)
+            raise HTTPException(status_code=500, detail=error_msg)
+        
+        print(f"✅ Registro actualizado exitosamente en jd_interviews")
+        
+        execution_time = str(datetime.now() - start_time)
+        evaluation_logger.log_task_complete("Crear Agente ElevenLabs", f"Agente creado y guardado exitosamente: {agent_id_elevenlabs}")
+        
+        return CreateAgentResponse(
+            status="success",
+            message=f"Agente de ElevenLabs creado y guardado exitosamente",
+            timestamp=datetime.now().isoformat(),
+            jd_interview_id=jd_interview_id,
+            agent_id=str(agent_id_elevenlabs),
+            agent_name=agent_name_final
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        error_msg = f"Error al crear agente de ElevenLabs: {str(e)}"
+        print(f"❌ {error_msg}")
+        evaluation_logger.log_error("API", error_msg)
+        import traceback
+        evaluation_logger.log_error("API", f"Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=error_msg)
 
 if __name__ == "__main__":
