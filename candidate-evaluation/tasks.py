@@ -655,10 +655,18 @@ def create_filtered_extraction_task(agent, jd_interview_id: str):
         agent=agent
     )
 
-def create_matching_task(agent):
+def create_matching_task(agent, user_id: str = None, client_id: str = None):
     """Tarea de matching de candidatos con entrevistas"""
+    from tools.supabase_tools import get_candidates_by_recruiter
+    
+    # Determinar qué herramienta usar y la descripción
+    if user_id and client_id:
+        candidates_instruction = f"- Usar get_candidates_by_recruiter(user_id='{user_id}', client_id='{client_id}') para obtener candidatos filtrados por user_id y client_id"
+    else:
+        candidates_instruction = "- Usar get_candidates_data() para obtener todos los candidatos"
+    
     return Task(
-        description="""
+        description=f"""
         ⏱️ Antes de comenzar, imprime: START MATCHING [YYYY-MM-DD HH:MM:SS]. Al finalizar, imprime: END MATCHING [YYYY-MM-DD HH:MM:SS].
 
         🎯 Realizar matching inteligente entre candidatos (tech_stack) y entrevistas (job_description).
@@ -666,76 +674,82 @@ def create_matching_task(agent):
         📊 **PROCESO DE MATCHING:**
         
         1. 📋 **Obtener Datos de Candidatos:**
-           - Usar get_candidates_data() para obtener todos los candidatos
+           {candidates_instruction}
            - Extraer el campo tech_stack de cada candidato que es un array de strings
            - Obtener información básica (id, name, email, phone, tech_stack, cv_url)
         
         2. 📋 **Obtener Datos de Entrevistas:**
-           - Usar get_all_jd_interviews() para obtener TODAS las entrevistas
+           {f"- Usar get_all_jd_interviews(client_id='{client_id}') para obtener entrevistas filtradas por client_id" if client_id else "- Usar get_all_jd_interviews() para obtener TODAS las entrevistas"}
            - Extraer los campos interview_name y job_description
            - Obtener información del agente asignado (agent_id)
         
-        3. 🔍 **Análisis de Compatibilidad:**
-           Para cada candidato vs cada entrevista:
+        3. 🚫 **Verificar Meets Existentes (ANTES DEL MATCHING):**
+           - Usar get_existing_meets_candidates() para obtener un diccionario donde cada clave es un jd_interview_id (string) y el valor es una lista de candidate_ids que ya tienen meets generados para esa entrevista
+           - IMPORTANTE: Antes de incluir un candidato en los matches para una jd_interview específica, verificar que su candidate_id NO esté en la lista de candidate_ids con meets existentes para esa jd_interview_id
+           - EXCLUIR completamente de los resultados cualquier combinación candidato-entrevista donde ya exista un meet
+           - Ejemplo: Si el resultado es {{"jd_123": ["cand_1", "cand_2"]}}, entonces NO incluir cand_1 ni cand_2 en los matches para jd_123
+        
+        4. 🔍 **Análisis de Compatibilidad:**
+           Para cada candidato vs cada entrevista (solo los que NO tienen meet existente):
            - Comparar cada tecnología del tech_stack (array) con el job_description (texto)
            - Buscar coincidencias case-insensitive y considerar variaciones (React=ReactJS, JavaScript=JS, Node.js=NodeJS)
            - Si hay al menos UNA coincidencia, calcular score > 0
            - Si NO hay coincidencias, score = 0 (no incluir en resultado)
         
-        4. 📊 **Criterios de Evaluación:**
+        5. 📊 **Criterios de Evaluación:**
            - Coincidencias exactas: 40% (tech_stack aparece en job_description)
            - Coincidencias relacionadas: 30% (frameworks/herramientas relacionadas)
            - Tecnologías complementarias: 20% (skills del JD que complementan)
            - Gaps críticos: -10% (tecnologías esenciales del JD que faltan)
            - Score mínimo: 10% si hay al menos una coincidencia
         
-        5. 🎯 **Generar Resultados SIMPLIFICADOS:**
+        6. 🎯 **Generar Resultados SIMPLIFICADOS:**
            - SOLO mostrar candidatos que tengan matches (score > 0) ordenados por score de mayor a menor
            - Para cada candidato con matches, incluir:
              * Datos completos del candidato (id, name, email, phone, cv_url, tech_stack)
              * Lista de entrevistas que coinciden con sus datos ordenadas por score de compatibilidad de mayor a menor
              * Para cada entrevista: registro completo de jd_interviews (id, interview_name, agent_id, job_description, client_id, created_at) + score de compatibilidad + análisis del match
         
-        6. 📝 **Formato de Salida SIMPLIFICADO:**
+        7. 📝 **Formato de Salida SIMPLIFICADO:**
            ```json
-           {
+           {{
              "matches": [
-               {
-                 "candidate": {
+               {{
+                 "candidate": {{
                    "id": "123",
                    "name": "Juan Pérez",
                    "email": "juan@email.com",
                    "phone": "+1234567890",
                    "cv_url": "https://s3.../cv.pdf",
                    "tech_stack": ["React", "JavaScript", "Node.js"]
-                 },
+                 }},
                  "matching_interviews": [
-                   {
-                     "jd_interviews": {
+                   {{
+                     "jd_interviews": {{
                        "id": "456",
                        "interview_name": "Desarrollador React Senior",
                        "agent_id": "agent_123",
                        "job_description": "Buscamos desarrollador con React, JavaScript...",
                        "client_id": "client_456",
                        "created_at": "2025-01-18T10:30:00Z"
-                     },
+                     }},
                      "compatibility_score": 85,
                      "match_analysis": "Excelente match con React y JavaScript..."
-                   }
+                   }}
                  ]
-               }
+               }}
              ]
-           }
+           }}
            ```
         
         ⚠️ **IMPORTANTE:** 
         - Solo incluir candidatos que tengan al menos un match (score > 0)
         - Todo el análisis debe estar en ESPAÑOL LATINO
         - Utiliza terminología de recursos humanos en español de América Latina
-        - Si no hay matches, retornar: {"matches": []}
+        - Si no hay matches, retornar: {{"matches": []}}
         - **CRÍTICO**: La respuesta debe ser SOLO JSON válido, sin texto adicional
         - **CRÍTICO**: No incluir explicaciones fuera del JSON
-        - **CRÍTICO**: El JSON debe empezar con { y terminar con }
+        - **CRÍTICO**: El JSON debe empezar con {{ y terminar con }}
         """,
         expected_output="SOLO JSON válido con estructura: {'matches': [{'candidate': {...}, 'matching_interviews': [{'jd_interviews': {...}, 'compatibility_score': X, 'match_analysis': '...'}]}]}",
         agent=agent

@@ -367,22 +367,77 @@ def send_match_notification_email(to_email: str, subject: str, body: str) -> str
         }, indent=2)
 
 @tool
-def get_all_jd_interviews() -> str:
+def get_existing_meets_candidates() -> str:
     """
-    Obtiene TODAS las entrevistas de la tabla jd_interviews para matching.
+    Obtiene los candidate_ids que ya tienen meets generados para todas las jd_interviews activas.
+    Verifica directamente en la tabla meets usando jd_interviews_id y candidate_id.
+    Útil para excluir candidatos del matching que ya tienen una entrevista programada.
     
     Returns:
-        JSON string con todos los datos de jd_interviews
+        JSON string con un diccionario donde las claves son jd_interview_ids (como strings) y los valores son listas de candidate_ids que ya tienen meets para esa entrevista.
+        Formato: {"jd_interview_id_1": ["candidate_id_1", "candidate_id_2"], "jd_interview_id_2": ["candidate_id_3"]}
     """
     try:
-        evaluation_logger.log_task_start("Obtener Todas las JD Interviews", "JD Interviews Extractor")
+        evaluation_logger.log_task_start("Obtener Candidatos con Meets Existentes", "Verificando meets para todas las entrevistas activas")
         
         url = os.getenv("SUPABASE_URL")
         key = os.getenv("SUPABASE_KEY")
         supabase = create_client(url, key)
         
-        # Obtener TODAS las entrevistas
-        response = supabase.table('jd_interviews').select('*').execute()
+        result = {}
+        
+        # Obtener todas las jd_interviews activas
+        jd_interviews_response = supabase.table('jd_interviews').select('id').eq('status', 'active').execute()
+        
+        for jd_interview in jd_interviews_response.data:
+            jd_interview_id = jd_interview.get('id')
+            
+            # Buscar directamente en la tabla meets usando jd_interviews_id y obtener candidate_id
+            meets_response = supabase.table('meets').select('candidate_id, jd_interviews_id').eq('jd_interviews_id', jd_interview_id).execute()
+            
+            # Extraer candidate_ids únicos de los meets
+            candidate_ids_set = set()
+            for meet in meets_response.data:
+                candidate_id = meet.get('candidate_id')
+                if candidate_id:
+                    candidate_ids_set.add(candidate_id)
+            
+            result[str(jd_interview_id)] = list(candidate_ids_set)
+        
+        evaluation_logger.log_task_complete("Obtener Candidatos con Meets Existentes", f"Verificados {len(result)} jd_interviews")
+        return json.dumps(result, indent=2)
+        
+    except Exception as e:
+        evaluation_logger.log_error("Obtener Candidatos con Meets Existentes", f"Error: {str(e)}")
+        return json.dumps({"error": f"Error obteniendo candidatos con meets existentes: {str(e)}"}, indent=2)
+
+@tool
+def get_all_jd_interviews(client_id: str = None) -> str:
+    """
+    Obtiene las entrevistas de la tabla jd_interviews para matching.
+    Si se proporciona client_id, filtra por ese cliente.
+    
+    Args:
+        client_id: ID del cliente para filtrar entrevistas (opcional)
+    
+    Returns:
+        JSON string con los datos de jd_interviews
+    """
+    try:
+        if client_id:
+            evaluation_logger.log_task_start("Obtener JD Interviews", f"Filtrando por client_id: {client_id}")
+        else:
+            evaluation_logger.log_task_start("Obtener Todas las JD Interviews", "JD Interviews Extractor")
+        
+        url = os.getenv("SUPABASE_URL")
+        key = os.getenv("SUPABASE_KEY")
+        supabase = create_client(url, key)
+        
+        # Obtener entrevistas (filtradas por client_id si se proporciona y status = 'active')
+        if client_id:
+            response = supabase.table('jd_interviews').select('*').eq('client_id', client_id).eq('status', 'active').execute()
+        else:
+            response = supabase.table('jd_interviews').select('*').eq('status', 'active').execute()
         
         interviews = []
         for row in response.data:
@@ -396,12 +451,16 @@ def get_all_jd_interviews() -> str:
             }
             interviews.append(interview)
         
-        evaluation_logger.log_task_complete("Obtener Todas las JD Interviews", f"{len(interviews)} entrevistas obtenidas")
+        if client_id:
+            evaluation_logger.log_task_complete("Obtener JD Interviews", f"{len(interviews)} entrevistas obtenidas para client_id: {client_id}")
+        else:
+            evaluation_logger.log_task_complete("Obtener Todas las JD Interviews", f"{len(interviews)} entrevistas obtenidas")
         return json.dumps(interviews, indent=2)
         
     except Exception as e:
-        evaluation_logger.log_error("Obtener Todas las JD Interviews", f"Error obteniendo datos: {str(e)}")
-        return json.dumps({"error": f"Error obteniendo datos de jd_interviews: {str(e)}"}, indent=2)
+        error_msg = f"Error obteniendo datos de jd_interviews" + (f" para client_id: {client_id}" if client_id else "")
+        evaluation_logger.log_error("Obtener JD Interviews", error_msg + f": {str(e)}")
+        return json.dumps({"error": error_msg + f": {str(e)}"}, indent=2)
 
 @tool
 def get_jd_interviews_data(jd_interview_id: str = None) -> str:
@@ -441,10 +500,11 @@ def get_jd_interviews_data(jd_interview_id: str = None) -> str:
         
         print(f"📊 Consultando tabla jd_interviews...")
         if jd_interview_id:
+            # Cuando se busca por ID específico, no filtrar por status (puede ser necesario acceder a registros inactivos)
             response = supabase.table('jd_interviews').select('*').eq('id', jd_interview_id).limit(1).execute()
         else:
-            # Limitar a 50 registros para evitar respuestas muy grandes
-            response = supabase.table('jd_interviews').select('*').limit(50).execute()
+            # Limitar a 50 registros y filtrar solo activos
+            response = supabase.table('jd_interviews').select('*').eq('status', 'active').limit(50).execute()
         
         if not response.data:
             msg = f"No se encontraron registros" + (f" con ID: {jd_interview_id}" if jd_interview_id else "")
@@ -941,6 +1001,62 @@ def save_meet_evaluation(full_result: str) -> str:
 
 
 @tool
+def get_candidates_by_recruiter(user_id: str, client_id: str, limit: int = 100) -> str:
+    """
+    Obtiene candidatos filtrados por user_id y client_id desde la tabla candidate_recruiters.
+    
+    Args:
+        user_id: ID del usuario que creó los candidatos
+        client_id: ID del cliente asociado
+        limit: Número máximo de candidatos a extraer
+        
+    Returns:
+        JSON string con los datos de candidatos filtrados
+    """
+    try:
+        evaluation_logger.log_task_start("Obtener Candidatos por Recruiter", f"Filtrando por user_id: {user_id}, client_id: {client_id}")
+        
+        url = os.getenv("SUPABASE_URL")
+        key = os.getenv("SUPABASE_KEY")
+        supabase = create_client(url, key)
+        
+        # 1. Obtener candidate_ids desde candidate_recruiters
+        recruiter_response = supabase.table('candidate_recruiters').select('candidate_id').eq('user_id', user_id).eq('client_id', client_id).execute()
+        
+        if not recruiter_response.data or len(recruiter_response.data) == 0:
+            evaluation_logger.log_task_progress("Obtener Candidatos por Recruiter", f"No se encontraron candidatos para user_id: {user_id}, client_id: {client_id}")
+            return json.dumps([], indent=2)
+        
+        candidate_ids = [row.get('candidate_id') for row in recruiter_response.data if row.get('candidate_id')]
+        
+        if not candidate_ids:
+            evaluation_logger.log_task_progress("Obtener Candidatos por Recruiter", "No se encontraron candidate_ids válidos")
+            return json.dumps([], indent=2)
+        
+        # 2. Obtener los candidatos usando los IDs
+        candidates_response = supabase.table('candidates').select('*').in_('id', candidate_ids).execute()
+        
+        candidates = []
+        for row in candidates_response.data:
+            candidate = {
+                "id": row.get('id'),
+                "name": row.get('name'),
+                "email": row.get('email'),
+                "phone": row.get('phone'),
+                "cv_url": row.get('cv_url'),
+                "tech_stack": row.get('tech_stack'),
+                "created_at": row.get('created_at')
+            }
+            candidates.append(candidate)
+        
+        evaluation_logger.log_task_complete("Obtener Candidatos por Recruiter", f"{len(candidates)} candidatos obtenidos para user_id: {user_id}, client_id: {client_id}")
+        return json.dumps(candidates, indent=2)
+        
+    except Exception as e:
+        evaluation_logger.log_error("Obtener Candidatos por Recruiter", f"Error obteniendo datos: {str(e)}")
+        return json.dumps({"error": f"Error obteniendo datos de candidatos filtrados: {str(e)}"}, indent=2)
+
+@tool
 def get_candidates_data(limit: int | dict | None = 100) -> str:
     """
     Obtiene datos de candidatos desde la tabla 'candidates' incluyendo tech_stack.
@@ -1004,9 +1120,10 @@ def get_candidates_data(limit: int | dict | None = 100) -> str:
         return json.dumps({"error": f"Error obteniendo datos de candidates: {str(e)}"}, indent=2)
 
 @tool
-def create_candidate(name: str, email: str, phone: str, cv_url: str, tech_stack: str) -> str:
+def create_candidate(name: str, email: str, phone: str, cv_url: str, tech_stack: str, user_id: str = None, client_id: str = None) -> str:
     """
     Crea (o actualiza por email) un candidato en la tabla 'candidates'.
+    Si se proporcionan user_id y client_id, también crea un registro en candidate_recruiters.
 
     Args:
         name: Nombre completo del candidato
@@ -1016,6 +1133,8 @@ def create_candidate(name: str, email: str, phone: str, cv_url: str, tech_stack:
         tech_stack: Tecnologías del candidato. Puede ser:
             - JSON array string (e.g. "[\"Python\", \"AWS\"]")
             - Lista separada por comas (e.g. "Python, AWS")
+        user_id: ID del usuario que crea el candidato (opcional)
+        client_id: ID del cliente asociado (opcional)
 
     Returns:
         JSON string con el resultado de la operación
@@ -1078,6 +1197,34 @@ def create_candidate(name: str, email: str, phone: str, cv_url: str, tech_stack:
         else:
             # Email ausente o inválido → se permite dar de alta igual
             response = supabase.table('candidates').insert(payload).execute()
+
+        # Si el candidato fue creado exitosamente y se proporcionaron user_id y client_id,
+        # crear registro en candidate_recruiters
+        candidate_id = None
+        if response.data and len(response.data) > 0:
+            candidate_id = response.data[0].get('id')
+            
+            if candidate_id and user_id and client_id:
+                try:
+                    # Insertar en candidate_recruiters
+                    recruiter_data = {
+                        'candidate_id': candidate_id,
+                        'user_id': user_id,
+                        'client_id': client_id
+                    }
+                    
+                    recruiter_response = supabase.table('candidate_recruiters').insert(recruiter_data).execute()
+                    
+                    if recruiter_response.data:
+                        evaluation_logger.log_task_complete("Crear Candidato", f"Registro creado en candidate_recruiters para candidate_id: {candidate_id}")
+                        print(f"✅ Registro creado en candidate_recruiters: candidate_id={candidate_id}, user_id={user_id}, client_id={client_id}")
+                    else:
+                        evaluation_logger.log_error("Crear Candidato", f"No se pudo crear registro en candidate_recruiters para candidate_id: {candidate_id}")
+                        print(f"⚠️ No se pudo crear registro en candidate_recruiters")
+                except Exception as recruiter_error:
+                    # No fallar la creación del candidato si falla la inserción en candidate_recruiters
+                    evaluation_logger.log_error("Crear Candidato", f"Error creando registro en candidate_recruiters: {str(recruiter_error)}")
+                    print(f"⚠️ Error creando registro en candidate_recruiters: {str(recruiter_error)}")
 
         evaluation_logger.log_task_complete("Crear Candidato", "Registro creado/actualizado en candidates")
         return json.dumps({

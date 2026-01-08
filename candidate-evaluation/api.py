@@ -226,6 +226,8 @@ class AnalysisResponse(BaseModel):
 
 class CVRequest(BaseModel):
     filename: str
+    client_id: str = None
+    user_id: str = None
 
 class CVAnalysisResponse(BaseModel):
     status: str
@@ -238,6 +240,10 @@ class CVAnalysisResponse(BaseModel):
     candidate_error: str | None = None
     candidate_result: dict | None = None
     candidate_status: str | None = None
+
+class MatchingRequest(BaseModel):
+    user_id: str = None
+    client_id: str = None
 
 class MatchingResponse(BaseModel):
     status: str
@@ -404,7 +410,6 @@ async def read_cv(request: CVRequest):
     """
     try:
         start_time = datetime.now()
-        
         # Verificar variables de entorno
         required_env_vars = ['AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'OPENAI_API_KEY']
         missing_vars = [var for var in required_env_vars if not os.getenv(var)]
@@ -420,7 +425,7 @@ async def read_cv(request: CVRequest):
         evaluation_logger.log_task_start("CV API", f"Iniciando análisis de CV: {request.filename}")
         
         # Crear y ejecutar crew
-        crew = create_cv_analysis_crew(request.filename)
+        crew = create_cv_analysis_crew(request.filename, user_id=request.user_id, client_id=request.client_id)
         
         print("=" * 80)
         print("🚀 INICIANDO EJECUCIÓN DEL CREW (CV Analysis)")
@@ -506,9 +511,12 @@ async def read_cv(request: CVRequest):
         raise HTTPException(status_code=500, detail=f"Error en el análisis del CV: {str(e)}")
 
 @app.post("/match-candidates", response_model=MatchingResponse)
-async def match_candidates():
+async def match_candidates(request: MatchingRequest = None):
     """
     Endpoint para realizar matching entre candidatos (tech_stack) y entrevistas (job_description)
+    
+    Args:
+        request: Objeto con user_id y client_id opcionales para filtrar candidatos
     
     Returns:
         MatchingResponse con los matches encontrados entre candidatos y entrevistas
@@ -528,12 +536,19 @@ async def match_candidates():
             )
         
         # Log inicio del proceso
-        evaluation_logger.log_task_start("Matching API", "Iniciando proceso de matching")
+        user_id = request.user_id if request else None
+        client_id = request.client_id if request else None
+        
+        if user_id and client_id:
+            evaluation_logger.log_task_start("Matching API", f"Iniciando proceso de matching filtrado por user_id: {user_id}, client_id: {client_id}")
+        else:
+            evaluation_logger.log_task_start("Matching API", "Iniciando proceso de matching (sin filtros)")
         
         # Crear y ejecutar crew de matching
-        crew = create_candidate_matching_crew()
+        crew = create_candidate_matching_crew(user_id=user_id, client_id=client_id)
         result = crew.kickoff()
         
+        print("result: ", result)
         # Calcular tiempo de ejecución
         end_time = datetime.now()
         execution_time = str(end_time - start_time)

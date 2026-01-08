@@ -7,12 +7,14 @@ from cv_agent import create_cv_analyzer_agent
 from utils.logger import evaluation_logger
 
 
-def create_cv_analysis_crew(filename: str):
+def create_cv_analysis_crew(filename: str, user_id: str = None, client_id: str = None):
     """
     Crea un crew especializado para analizar un CV desde S3
     
     Args:
         filename: Nombre del archivo CV en S3
+        user_id: ID del usuario que crea el candidato (opcional)
+        client_id: ID del cliente asociado (opcional)
         
     Returns:
         Crew configurado para análisis de CV
@@ -38,6 +40,7 @@ def create_cv_analysis_crew(filename: str):
         6. Crea o actualiza el candidato en la tabla 'candidates' usando la herramienta create_candidate, con los campos:
            - name, email, phone, tech_stack (array)
            - cv_url: Construir como "https://hhrr-ai-multiagents.s3.us-east-1.amazonaws.com/cvs/{filename}"
+           {f" - user_id: {user_id}, client_id: {client_id} (IMPORTANTE: incluir estos parámetros si están disponibles)" if user_id and client_id else ""}
         7. Confirma el resultado del upsert devolviendo el ID o el registro creado
         
         FORMATO DE SALIDA REQUERIDO:
