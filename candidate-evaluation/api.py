@@ -745,6 +745,63 @@ async def outlook_webhook(request: Request):
         evaluation_logger.log_error("Webhook", f"Error en webhook: {str(e)}")
         return {"status": "error"}
 
+def _build_emotion_sentiment_summary(emotion_analysis: dict | None) -> dict | None:
+    """
+    Construye un pequeño resumen textual de emociones a partir de emotion_analysis
+    proveniente de la tabla conversations.emotion_analysis (Prosody / Burst).
+    """
+    if not isinstance(emotion_analysis, dict):
+        return None
+
+    prosody = emotion_analysis.get("prosody") or {}
+    burst = emotion_analysis.get("burst") or {}
+
+    prosody_summary = prosody.get("summary") or []
+    burst_summary = burst.get("summary") or []
+
+    def summarize(label: str, items: list[dict]) -> str:
+        if not items:
+            return f"No se detectaron emociones predominantes en {label}."
+
+        # Ordenar por averageScore descendente y tomar top 3
+        ordered = sorted(
+            items,
+            key=lambda x: x.get("averageScore", 0) or 0,
+            reverse=True,
+        )[:3]
+
+        def display_name(item: dict) -> str:
+            return item.get("nameTranslated") or item.get("name") or "N/A"
+
+        names = [display_name(it) for it in ordered]
+        top_score = ordered[0].get("averageScore", 0) or 0
+
+        if top_score >= 0.6:
+            intensity = "muy alta"
+        elif top_score >= 0.3:
+            intensity = "moderada"
+        else:
+            intensity = "baja"
+
+        if len(names) == 1:
+            names_text = names[0]
+        elif len(names) == 2:
+            names_text = f"{names[0]} y {names[1]}"
+        else:
+            names_text = f"{', '.join(names[:-1])} y {names[-1]}"
+
+        return f"En {label} predominaron {names_text}, con una intensidad emocional {intensity}."
+
+    prosody_text = summarize("la voz continua (prosody)", prosody_summary)
+    burst_text = summarize("los vocal bursts (burst)", burst_summary)
+
+    return {
+        "raw_emotion_analysis": emotion_analysis,
+        "prosody_summary_text": prosody_text,
+        "burst_summary_text": burst_text,
+    }
+
+
 @app.post("/evaluate-meet", response_model=AnalysisResponse)
 async def evaluate_single_meet(request: SingleMeetRequest):
     """
@@ -841,11 +898,13 @@ async def evaluate_single_meet(request: SingleMeetRequest):
                 full_result = {}
         
         # Extraer solo los campos finales del match_evaluation
-        result_data = {
+        result_data: dict[str, Any] = {
             "final_recommendation": None,
             "justification": None,
             "is_potential_match": None,
-            "compatibility_score": None
+            "compatibility_score": None,
+            # Campo para exponer en el resultado final el resumen de emociones de voz
+            "emotion_sentiment_summary": None,
         }
         
         # Buscar en match_evaluation
@@ -857,6 +916,64 @@ async def evaluate_single_meet(request: SingleMeetRequest):
                 result_data["is_potential_match"] = match_eval.get("is_potential_match")
                 result_data["compatibility_score"] = match_eval.get("compatibility_score")
         
+        # ===== Verificar si el agente procesó emotion_analysis =====
+        # El agente ahora recibe emotion_analysis a través de get_meet_evaluation_data
+        # y debe procesarlo en su análisis. Solo verificamos si lo hizo y agregamos datos raw si falta.
+        try:
+            if isinstance(full_result, dict):
+                conversation_analysis = full_result.get("conversation_analysis") or {}
+                emotion_summary = conversation_analysis.get("emotion_sentiment_summary")
+                
+                # Si el agente no procesó los datos de emociones, intentar obtenerlos y agregarlos como fallback
+                if not emotion_summary or not emotion_summary.get("prosody_summary_text"):
+                    url = os.getenv("SUPABASE_URL")
+                    key = os.getenv("SUPABASE_KEY")
+                    if url and key:
+                        supabase = create_client(url, key)
+
+                        # Tomar la conversación más reciente asociada al meet
+                        conv_resp = (
+                            supabase.table("conversations")
+                            .select("emotion_analysis")
+                            .eq("meet_id", meet_id)
+                            .order("created_at", desc=True)
+                            .limit(1)
+                            .execute()
+                        )
+
+                        if conv_resp.data and len(conv_resp.data) > 0:
+                            emotion_analysis = conv_resp.data[0].get("emotion_analysis")
+                            if emotion_analysis:
+                                # Solo agregar datos raw si el agente no los procesó
+                                if not emotion_summary:
+                                    conversation_analysis["emotion_sentiment_summary"] = {
+                                        "raw_emotion_analysis": emotion_analysis,
+                                        "prosody_summary_text": None,
+                                        "burst_summary_text": None,
+                                    }
+                                    full_result["conversation_analysis"] = conversation_analysis
+                                    evaluation_logger.log_task_progress(
+                                        "API",
+                                        "Datos raw de emotion_analysis agregados (el agente no los procesó)",
+                                    )
+                                elif not emotion_summary.get("raw_emotion_analysis"):
+                                    # Agregar solo raw_emotion_analysis si falta
+                                    emotion_summary["raw_emotion_analysis"] = emotion_analysis
+                                    conversation_analysis["emotion_sentiment_summary"] = emotion_summary
+                                    full_result["conversation_analysis"] = conversation_analysis
+                
+                # Exponer resumen en result_data si existe
+                if emotion_summary:
+                    result_data["emotion_sentiment_summary"] = {
+                        "prosody_summary_text": emotion_summary.get("prosody_summary_text"),
+                        "burst_summary_text": emotion_summary.get("burst_summary_text"),
+                    }
+        except Exception as emotion_err:
+            evaluation_logger.log_error(
+                "API",
+                f"Error al verificar/agregar emotion_analysis: {emotion_err}",
+            )
+
         # Guardar evaluación en la base de datos - MEET_EVALUATIONS
         if isinstance(full_result, dict) and full_result:
             try:
@@ -941,6 +1058,9 @@ async def evaluate_single_meet(request: SingleMeetRequest):
                             # Obtener datos completos para el email
                             candidate_data = full_result.get("candidate", {})
                             conversation_data = full_result.get("conversation_analysis", {})
+                            emotion_summary = conversation_data.get("emotion_sentiment_summary", {}) if isinstance(conversation_data, dict) else {}
+                            prosody_summary_text = emotion_summary.get("prosody_summary_text")
+                            burst_summary_text = emotion_summary.get("burst_summary_text")
                             
                             # Obtener la conversación completa del meet
                             conversation_response = supabase.table('conversations').select(
@@ -989,6 +1109,8 @@ async def evaluate_single_meet(request: SingleMeetRequest):
                                 candidate_tech_stack=tech_stack_str,
                                 candidate_cv_url=candidate_data.get('cv_url', 'N/A'),
                                 soft_skills_formatted=format_soft_skills(conversation_data.get('soft_skills', {})),
+                                emotion_prosody_summary_text=prosody_summary_text or "No se detectaron emociones predominantes en la voz continua.",
+                                emotion_burst_summary_text=burst_summary_text or "No se detectaron emociones predominantes en los vocal bursts.",
                                 knowledge_level=technical_assessment.get('knowledge_level', 'N/A'),
                                 practical_experience=technical_assessment.get('practical_experience', 'N/A'),
                                 technical_questions_formatted=format_technical_questions(technical_assessment.get('technical_questions', [])),

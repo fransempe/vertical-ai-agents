@@ -771,15 +771,16 @@ def get_meet_evaluation_data(meet_id: str) -> str:
         
         meet = meet_response.data[0]
         
-        # 2. Obtener la conversación del meet
+        # 2. Obtener la conversación del meet (incluyendo emotion_analysis)
         conversation_response = supabase.table('conversations').select(
             '''
             meet_id,
             candidate_id,
             conversation_data,
+            emotion_analysis,
             candidates(id, name, email, phone, cv_url, tech_stack)
             '''
-        ).eq('meet_id', meet_id).execute()
+        ).eq('meet_id', meet_id).order('created_at', desc=True).limit(1).execute()
         
         client_response = supabase.table('clients').select('*').eq('id', meet.get('jd_interviews').get('client_id')).execute()
         print("client_id: ", meet.get('jd_interviews').get('client_id'))
@@ -799,6 +800,7 @@ def get_meet_evaluation_data(meet_id: str) -> str:
                 "meet_id": row['meet_id'],
                 "candidate_id": row['candidate_id'],
                 "conversation_data": row['conversation_data'],
+                "emotion_analysis": row.get('emotion_analysis'),  # Incluir emotion_analysis
                 "candidate": {
                     "id": row['candidates']['id'] if row['candidates'] else None,
                     "name": row['candidates']['name'] if row['candidates'] else None,
