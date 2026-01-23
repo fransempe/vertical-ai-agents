@@ -9,9 +9,12 @@ import base64
 import re
 import requests
 import tiktoken
+import uuid
+import threading
 from datetime import datetime
 from pathlib import Path
 from contextlib import asynccontextmanager
+from typing import Dict, Optional
 from fastapi import FastAPI, HTTPException, Request, BackgroundTasks, Response
 import httpx
 from pydantic import BaseModel
@@ -208,6 +211,9 @@ app = FastAPI(
     version="1.0.0",
 )
 
+# Storage para runs (en producción usar Redis o DB)
+matching_runs: Dict[str, dict] = {}
+
 class AnalysisRequest(BaseModel):
     jd_interview_id: str = None
 
@@ -252,6 +258,14 @@ class MatchingResponse(BaseModel):
     execution_time: str = None
     matches: list = None
     total_matches: int = None
+
+class RunStatusResponse(BaseModel):
+    status: str
+    runId: str = None
+    progress: float = None
+    message: str = None
+    result: dict = None
+    error: str = None
 
 @app.post("/analyze", response_model=AnalysisResponse)
 async def trigger_analysis(request: AnalysisRequest = None):
@@ -510,18 +524,18 @@ async def read_cv(request: CVRequest):
         evaluation_logger.log_error("CV API", f"Error en análisis de CV: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error en el análisis del CV: {str(e)}")
 
-@app.post("/match-candidates", response_model=MatchingResponse)
-async def match_candidates(request: MatchingRequest = None):
+def do_matching_long_task(run_id: str, user_id: Optional[str], client_id: Optional[str]):
     """
-    Endpoint para realizar matching entre candidatos (tech_stack) y entrevistas (job_description)
-    
-    Args:
-        request: Objeto con user_id y client_id opcionales para filtrar candidatos
-    
-    Returns:
-        MatchingResponse con los matches encontrados entre candidatos y entrevistas
+    Ejecuta el proceso de matching en background
     """
     try:
+        matching_runs[run_id] = {
+            "status": "running",
+            "progress": 0.0,
+            "message": "Iniciando proceso de matching...",
+            "runId": run_id
+        }
+        
         start_time = datetime.now()
         
         # Verificar variables de entorno
@@ -529,26 +543,45 @@ async def match_candidates(request: MatchingRequest = None):
         missing_vars = [var for var in required_env_vars if not os.getenv(var)]
         
         if missing_vars:
-            evaluation_logger.log_error("Matching API", f"Variables de entorno faltantes: {missing_vars}")
-            raise HTTPException(
-                status_code=500, 
-                detail=f"Variables de entorno faltantes: {missing_vars}"
-            )
+            matching_runs[run_id] = {
+                "status": "error",
+                "error": f"Variables de entorno faltantes: {missing_vars}",
+                "runId": run_id
+            }
+            return
         
         # Log inicio del proceso
-        user_id = request.user_id if request else None
-        client_id = request.client_id if request else None
-        
         if user_id and client_id:
             evaluation_logger.log_task_start("Matching API", f"Iniciando proceso de matching filtrado por user_id: {user_id}, client_id: {client_id}")
         else:
             evaluation_logger.log_task_start("Matching API", "Iniciando proceso de matching (sin filtros)")
         
+        matching_runs[run_id] = {
+            "status": "running",
+            "progress": 0.2,
+            "message": "Creando crew de matching...",
+            "runId": run_id
+        }
+        
         # Crear y ejecutar crew de matching
         crew = create_candidate_matching_crew(user_id=user_id, client_id=client_id)
+        
+        matching_runs[run_id] = {
+            "status": "running",
+            "progress": 0.4,
+            "message": "Ejecutando matching...",
+            "runId": run_id
+        }
+        
         result = crew.kickoff()
         
-        print("result: ", result)
+        matching_runs[run_id] = {
+            "status": "running",
+            "progress": 0.7,
+            "message": "Procesando resultados...",
+            "runId": run_id
+        }
+        
         # Calcular tiempo de ejecución
         end_time = datetime.now()
         execution_time = str(end_time - start_time)
@@ -572,7 +605,6 @@ async def match_candidates(request: MatchingRequest = None):
             evaluation_logger.log_task_progress("Matching API", "Resultado no es JSON válido, intentando extraer datos del texto")
             
             # Intentar extraer JSON del texto usando regex
-            import re
             json_pattern = r'\{.*"matches".*\}'
             json_matches = re.findall(json_pattern, result_text, re.DOTALL)
             
@@ -605,18 +637,117 @@ async def match_candidates(request: MatchingRequest = None):
                 "raw_result": result_text[:1000] + "..." if len(result_text) > 1000 else result_text
             }
         
-        return MatchingResponse(
-            status="success",
-            message="Matching de candidatos completado exitosamente",
-            timestamp=start_time.strftime('%Y-%m-%d %H:%M:%S'),
-            execution_time=execution_time,
-            matches=matches_list,
-            total_matches=total_matches
+        # Guardar resultado
+        result_data = {
+            "status": "success",
+            "message": "Matching de candidatos completado exitosamente",
+            "timestamp": start_time.strftime('%Y-%m-%d %H:%M:%S'),
+            "execution_time": execution_time,
+            "matches": matches_list,
+            "total_matches": total_matches
+        }
+        
+        matching_runs[run_id] = {
+            "status": "done",
+            "progress": 1.0,
+            "message": "Matching completado exitosamente",
+            "result": result_data,
+            "runId": run_id
+        }
+        
+    except Exception as e:
+        error_msg = str(e)
+        evaluation_logger.log_error("Matching API", f"Error en matching: {error_msg}")
+        matching_runs[run_id] = {
+            "status": "error",
+            "error": error_msg,
+            "runId": run_id
+        }
+
+@app.post("/match-candidates")
+async def match_candidates(request: MatchingRequest = None):
+    """
+    Endpoint para iniciar matching entre candidatos (tech_stack) y entrevistas (job_description)
+    Retorna inmediatamente con un runId para consultar el estado
+    
+    Args:
+        request: Objeto con user_id y client_id opcionales para filtrar candidatos
+    
+    Returns:
+        JSON con runId para consultar el estado del proceso
+    """
+    try:
+        user_id = request.user_id if request else None
+        client_id = request.client_id if request else None
+        
+        # Generar runId único
+        run_id = str(uuid.uuid4())
+        
+        # Inicializar estado
+        matching_runs[run_id] = {
+            "status": "queued",
+            "progress": 0.0,
+            "message": "Proceso en cola...",
+            "runId": run_id
+        }
+        
+        # Ejecutar en background usando threading
+        thread = threading.Thread(
+            target=do_matching_long_task,
+            args=(run_id, user_id, client_id),
+            daemon=True
+        )
+        thread.start()
+        
+        # Retornar inmediatamente con runId
+        return Response(
+            content=json.dumps({
+                "runId": run_id,
+                "status": "queued",
+                "message": "Matching iniciado, consulta el estado con GET /match-candidates/{runId}"
+            }),
+            status_code=202,
+            media_type="application/json"
         )
         
     except Exception as e:
-        evaluation_logger.log_error("Matching API", f"Error en matching: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error en el matching: {str(e)}")
+        evaluation_logger.log_error("Matching API", f"Error iniciando matching: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error iniciando matching: {str(e)}")
+
+@app.get("/match-candidates/{run_id}")
+async def get_matching_status(run_id: str):
+    """
+    Endpoint para consultar el estado del proceso de matching
+    
+    Args:
+        run_id: ID del proceso de matching
+    
+    Returns:
+        Estado del proceso: queued, running, done, o error
+    """
+    if run_id not in matching_runs:
+        raise HTTPException(status_code=404, detail="runId not found")
+    
+    run_data = matching_runs[run_id]
+    
+    # Formatear respuesta según el estado (formato compatible con RunStatus del frontend)
+    if run_data["status"] == "done":
+        return {
+            "status": "done",
+            "result": run_data.get("result")
+        }
+    elif run_data["status"] == "error":
+        return {
+            "status": "error",
+            "error": run_data.get("error", "Unknown error")
+        }
+    else:
+        # queued o running
+        return {
+            "status": run_data["status"],
+            "progress": run_data.get("progress", 0.0),
+            "message": run_data.get("message", "")
+        }
 
 @app.get("/status")
 async def get_status():
@@ -745,6 +876,63 @@ async def outlook_webhook(request: Request):
         evaluation_logger.log_error("Webhook", f"Error en webhook: {str(e)}")
         return {"status": "error"}
 
+def _build_emotion_sentiment_summary(emotion_analysis: dict | None) -> dict | None:
+    """
+    Construye un pequeño resumen textual de emociones a partir de emotion_analysis
+    proveniente de la tabla conversations.emotion_analysis (Prosody / Burst).
+    """
+    if not isinstance(emotion_analysis, dict):
+        return None
+
+    prosody = emotion_analysis.get("prosody") or {}
+    burst = emotion_analysis.get("burst") or {}
+
+    prosody_summary = prosody.get("summary") or []
+    burst_summary = burst.get("summary") or []
+
+    def summarize(label: str, items: list[dict]) -> str:
+        if not items:
+            return f"No se detectaron emociones predominantes en {label}."
+
+        # Ordenar por averageScore descendente y tomar top 3
+        ordered = sorted(
+            items,
+            key=lambda x: x.get("averageScore", 0) or 0,
+            reverse=True,
+        )[:3]
+
+        def display_name(item: dict) -> str:
+            return item.get("nameTranslated") or item.get("name") or "N/A"
+
+        names = [display_name(it) for it in ordered]
+        top_score = ordered[0].get("averageScore", 0) or 0
+
+        if top_score >= 0.6:
+            intensity = "muy alta"
+        elif top_score >= 0.3:
+            intensity = "moderada"
+        else:
+            intensity = "baja"
+
+        if len(names) == 1:
+            names_text = names[0]
+        elif len(names) == 2:
+            names_text = f"{names[0]} y {names[1]}"
+        else:
+            names_text = f"{', '.join(names[:-1])} y {names[-1]}"
+
+        return f"En {label} predominaron {names_text}, con una intensidad emocional {intensity}."
+
+    prosody_text = summarize("la voz continua (prosody)", prosody_summary)
+    burst_text = summarize("los vocal bursts (burst)", burst_summary)
+
+    return {
+        "raw_emotion_analysis": emotion_analysis,
+        "prosody_summary_text": prosody_text,
+        "burst_summary_text": burst_text,
+    }
+
+
 @app.post("/evaluate-meet", response_model=AnalysisResponse)
 async def evaluate_single_meet(request: SingleMeetRequest):
     """
@@ -841,11 +1029,13 @@ async def evaluate_single_meet(request: SingleMeetRequest):
                 full_result = {}
         
         # Extraer solo los campos finales del match_evaluation
-        result_data = {
+        result_data: dict[str, Any] = {
             "final_recommendation": None,
             "justification": None,
             "is_potential_match": None,
-            "compatibility_score": None
+            "compatibility_score": None,
+            # Campo para exponer en el resultado final el resumen de emociones de voz
+            "emotion_sentiment_summary": None,
         }
         
         # Buscar en match_evaluation
@@ -857,6 +1047,64 @@ async def evaluate_single_meet(request: SingleMeetRequest):
                 result_data["is_potential_match"] = match_eval.get("is_potential_match")
                 result_data["compatibility_score"] = match_eval.get("compatibility_score")
         
+        # ===== Verificar si el agente procesó emotion_analysis =====
+        # El agente ahora recibe emotion_analysis a través de get_meet_evaluation_data
+        # y debe procesarlo en su análisis. Solo verificamos si lo hizo y agregamos datos raw si falta.
+        try:
+            if isinstance(full_result, dict):
+                conversation_analysis = full_result.get("conversation_analysis") or {}
+                emotion_summary = conversation_analysis.get("emotion_sentiment_summary")
+                
+                # Si el agente no procesó los datos de emociones, intentar obtenerlos y agregarlos como fallback
+                if not emotion_summary or not emotion_summary.get("prosody_summary_text"):
+                    url = os.getenv("SUPABASE_URL")
+                    key = os.getenv("SUPABASE_KEY")
+                    if url and key:
+                        supabase = create_client(url, key)
+
+                        # Tomar la conversación más reciente asociada al meet
+                        conv_resp = (
+                            supabase.table("conversations")
+                            .select("emotion_analysis")
+                            .eq("meet_id", meet_id)
+                            .order("created_at", desc=True)
+                            .limit(1)
+                            .execute()
+                        )
+
+                        if conv_resp.data and len(conv_resp.data) > 0:
+                            emotion_analysis = conv_resp.data[0].get("emotion_analysis")
+                            if emotion_analysis:
+                                # Solo agregar datos raw si el agente no los procesó
+                                if not emotion_summary:
+                                    conversation_analysis["emotion_sentiment_summary"] = {
+                                        "raw_emotion_analysis": emotion_analysis,
+                                        "prosody_summary_text": None,
+                                        "burst_summary_text": None,
+                                    }
+                                    full_result["conversation_analysis"] = conversation_analysis
+                                    evaluation_logger.log_task_progress(
+                                        "API",
+                                        "Datos raw de emotion_analysis agregados (el agente no los procesó)",
+                                    )
+                                elif not emotion_summary.get("raw_emotion_analysis"):
+                                    # Agregar solo raw_emotion_analysis si falta
+                                    emotion_summary["raw_emotion_analysis"] = emotion_analysis
+                                    conversation_analysis["emotion_sentiment_summary"] = emotion_summary
+                                    full_result["conversation_analysis"] = conversation_analysis
+                
+                # Exponer resumen en result_data si existe
+                if emotion_summary:
+                    result_data["emotion_sentiment_summary"] = {
+                        "prosody_summary_text": emotion_summary.get("prosody_summary_text"),
+                        "burst_summary_text": emotion_summary.get("burst_summary_text"),
+                    }
+        except Exception as emotion_err:
+            evaluation_logger.log_error(
+                "API",
+                f"Error al verificar/agregar emotion_analysis: {emotion_err}",
+            )
+
         # Guardar evaluación en la base de datos - MEET_EVALUATIONS
         if isinstance(full_result, dict) and full_result:
             try:
@@ -941,6 +1189,9 @@ async def evaluate_single_meet(request: SingleMeetRequest):
                             # Obtener datos completos para el email
                             candidate_data = full_result.get("candidate", {})
                             conversation_data = full_result.get("conversation_analysis", {})
+                            emotion_summary = conversation_data.get("emotion_sentiment_summary", {}) if isinstance(conversation_data, dict) else {}
+                            prosody_summary_text = emotion_summary.get("prosody_summary_text")
+                            burst_summary_text = emotion_summary.get("burst_summary_text")
                             
                             # Obtener la conversación completa del meet
                             conversation_response = supabase.table('conversations').select(
@@ -989,6 +1240,8 @@ async def evaluate_single_meet(request: SingleMeetRequest):
                                 candidate_tech_stack=tech_stack_str,
                                 candidate_cv_url=candidate_data.get('cv_url', 'N/A'),
                                 soft_skills_formatted=format_soft_skills(conversation_data.get('soft_skills', {})),
+                                emotion_prosody_summary_text=prosody_summary_text or "No se detectaron emociones predominantes en la voz continua.",
+                                emotion_burst_summary_text=burst_summary_text or "No se detectaron emociones predominantes en los vocal bursts.",
                                 knowledge_level=technical_assessment.get('knowledge_level', 'N/A'),
                                 practical_experience=technical_assessment.get('practical_experience', 'N/A'),
                                 technical_questions_formatted=format_technical_questions(technical_assessment.get('technical_questions', [])),

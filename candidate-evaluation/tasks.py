@@ -876,6 +876,41 @@ def create_single_meet_evaluation_task(agent, extraction_task):
         - **Inteligencia Emocional**: Autoconciencia y empatía
         - **Aprendizaje Continuo**: Curiosidad y disposición a crecer
         
+        ### Análisis de Emociones de Voz (si está disponible):
+        Si los datos incluyen `emotion_analysis` en la conversación, realizar un análisis profundo:
+        - **Tono no lingüístico (Prosody)**: Analizar las emociones detectadas en la voz continua del candidato.
+          * Identificar las emociones predominantes (top 3-5) y su intensidad (basado en averageScore)
+          * Analizar qué emociones son más frecuentes y qué significan en el contexto de la entrevista
+          * Relacionar las emociones detectadas con las respuestas del candidato y su comportamiento comunicativo
+          * **CRÍTICO: Generar un resumen interpretativo de MÍNIMO 3-4 renglones (NO menos) que explique detalladamente qué revelan estas emociones sobre el candidato**
+          * El resumen debe ser extenso y detallado, incluyendo: emociones principales con porcentajes específicos, intensidad emocional, significado contextual profundo, correlación con el comportamiento durante la entrevista, y posibles implicaciones sobre el perfil del candidato
+          * Ejemplo completo de 3-4 renglones: "El candidato mostró predominantemente Concentración (47.6%), Determinación (37.9%) y Contemplación (31.4%) con intensidad muy alta en su tono de voz continua durante toda la entrevista. Esta combinación emocional sugiere un enfoque serio, comprometido y reflexivo, indicando que el candidato se toma el proceso de selección con gran seriedad y demuestra capacidad de análisis profundo en sus respuestas. La alta intensidad de estas emociones positivas refleja confianza en sus conocimientos y preparación adecuada para el puesto. Además, la presencia constante de Contemplación sugiere que el candidato procesa cuidadosamente las preguntas antes de responder, lo cual es una señal positiva de pensamiento crítico y profesionalismo."
+        
+        - **Expresiones (Burst)**: Analizar las emociones detectadas en los vocal bursts (expresiones breves).
+          * Identificar las emociones más frecuentes (top 3-5) en momentos de expresión espontánea
+          * Analizar la coherencia entre lo que dice el candidato y sus expresiones emocionales
+          * Detectar posibles señales de nerviosismo, confianza, entusiasmo o preocupación
+          * **CRÍTICO: Generar un resumen interpretativo de MÍNIMO 3-4 renglones (NO menos) que explique detalladamente el significado de estas expresiones**
+          * El resumen debe ser extenso y detallado, incluyendo: emociones principales con porcentajes específicos, intensidad emocional, significado contextual profundo, análisis de coherencia con el contenido verbal, y posibles señales positivas o de alerta
+          * Ejemplo completo de 3-4 renglones: "Las expresiones espontáneas (vocal bursts) mostraron principalmente Alegría (38.5%), Amusement (37.2%) y Excitement (20.0%) con intensidad moderada a alta a lo largo de la entrevista. Esto indica genuino interés y entusiasmo por el puesto, así como una actitud positiva y relajada durante el proceso de selección. La presencia consistente de estas emociones positivas sugiere que el candidato se siente cómodo con el proceso y muestra autenticidad en sus respuestas, lo cual es una señal muy positiva de transparencia y confianza. La combinación de Alegría y Excitement especialmente en momentos clave de la conversación refleja que el candidato está genuinamente interesado en la oportunidad y no está simplemente cumpliendo con un proceso formal."
+        
+        - **Integración con el análisis general**: 
+          * Usar los datos de emociones para enriquecer el análisis de habilidades blandas
+          * Correlacionar las emociones detectadas con la evaluación de inteligencia emocional
+          * Considerar las emociones como contexto adicional para entender mejor las respuestas del candidato
+          * Si hay inconsistencias entre lo que dice y sus emociones, mencionarlo como observación
+        
+        **IMPORTANTE sobre análisis de emociones:**
+        - Si `emotion_analysis` está presente en los datos, DEBES incluirlo en tu análisis
+        - Usa los datos de `prosody.summary` y `burst.summary` para identificar emociones predominantes (top 3-5)
+        - **CRÍTICO: Genera resúmenes textuales interpretativos de MÍNIMO 3-4 renglones para cada uno (prosody y burst)**
+        - Los resúmenes NO deben ser cortos (1-2 renglones), deben ser extensos y detallados (3-4 renglones mínimo)
+        - Incluye porcentajes específicos de las emociones, intensidad emocional, significado contextual profundo, y análisis de implicaciones
+        - Incluye este análisis en `conversation_analysis.emotion_sentiment_summary` con:
+          * `prosody_summary_text`: Resumen interpretativo extenso (3-4 renglones mínimo) del tono no lingüístico
+          * `burst_summary_text`: Resumen interpretativo extenso (3-4 renglones mínimo) de las expresiones
+        - Si NO hay datos de `emotion_analysis`, simplemente omite esta sección
+        
         ### Aspectos Técnicos - Análisis Detallado:
         - **Conocimientos Técnicos**: Nivel demostrado con ejemplos específicos
         - **Experiencia Práctica**: Evidencia de experiencia real
@@ -968,6 +1003,11 @@ def create_single_meet_evaluation_task(agent, extraction_task):
                 "not_answered": X
               }},
               "alerts": ["alertas críticas si las hay"]
+            }},
+            "emotion_sentiment_summary": {{
+              "prosody_summary_text": "Resumen interpretativo del tono no lingüístico (solo si hay datos de emotion_analysis)",
+              "burst_summary_text": "Resumen interpretativo de las expresiones (solo si hay datos de emotion_analysis)",
+              "raw_emotion_analysis": {{}}
             }}
           }},
           "jd_analysis": {{
@@ -1023,6 +1063,16 @@ def create_single_meet_evaluation_task(agent, extraction_task):
            - Compara SOLO lo que está en los datos reales
            - NO inventes tecnologías, proyectos o experiencias del candidato
            - NO inventes requisitos de la JD que no estén en job_description
+        
+        6. **PARA ANÁLISIS DE EMOCIONES:**
+           - Si los datos incluyen `emotion_analysis` en `conversation`, DEBES analizarlo
+           - Usa los datos de `prosody.summary` y `burst.summary` para identificar emociones predominantes (top 3-5)
+           - **CRÍTICO: Genera resúmenes interpretativos de MÍNIMO 3-4 renglones (NO menos) que expliquen detalladamente qué significan las emociones en el contexto de la entrevista**
+           - Los resúmenes deben ser EXTENSOS y DETALLADOS, incluyendo: emociones principales con porcentajes específicos, intensidad emocional, significado contextual profundo, correlación con el comportamiento, y análisis de implicaciones sobre el perfil del candidato
+           - NO generes resúmenes cortos (1-2 renglones), deben ser extensos (3-4 renglones mínimo)
+           - Sé exhaustivo en el análisis: proporciona información sustancial y detallada sobre cada aspecto emocional
+           - NO inventes emociones que no estén en los datos
+           - Si NO hay datos de `emotion_analysis`, simplemente omite la sección `emotion_sentiment_summary`
         
         IMPORTANTE: 
         - Ser exhaustivo pero conciso
