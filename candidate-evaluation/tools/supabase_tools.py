@@ -1122,7 +1122,7 @@ def get_candidates_data(limit: int | dict | None = 100) -> str:
         return json.dumps({"error": f"Error obteniendo datos de candidates: {str(e)}"}, indent=2)
 
 @tool
-def create_candidate(name: str, email: str, phone: str, cv_url: str, tech_stack: str, user_id: str = None, client_id: str = None) -> str:
+def create_candidate(name: str, email: str, phone: str, cv_url: str, tech_stack: str, linkedin: str = None, user_id: str = None, client_id: str = None) -> str:
     """
     Crea (o actualiza por email) un candidato en la tabla 'candidates'.
     Si se proporcionan user_id y client_id, también crea un registro en candidate_recruiters.
@@ -1135,6 +1135,7 @@ def create_candidate(name: str, email: str, phone: str, cv_url: str, tech_stack:
         tech_stack: Tecnologías del candidato. Puede ser:
             - JSON array string (e.g. "[\"Python\", \"AWS\"]")
             - Lista separada por comas (e.g. "Python, AWS")
+        linkedin: URL del perfil de LinkedIn del candidato (opcional)
         user_id: ID del usuario que crea el candidato (opcional)
         client_id: ID del cliente asociado (opcional)
 
@@ -1165,6 +1166,7 @@ def create_candidate(name: str, email: str, phone: str, cv_url: str, tech_stack:
             "name": name or None,
             "email": email or None,
             "phone": phone or None,
+            "linkedin": linkedin or None,
             "cv_url": cv_url or None,
             "tech_stack": parsed_stack if parsed_stack else None,
         }

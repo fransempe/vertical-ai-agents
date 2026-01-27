@@ -33,7 +33,7 @@ def create_cv_analyzer_agent():
         
         Tienes experiencia en:
         - Lectura y análisis de CVs en múltiples formatos (PDF, DOC, DOCX)
-        - Extracción de datos de contacto (nombre, email, teléfono)
+        - Extracción de datos de contacto (nombre, email, teléfono, LinkedIn)
         - Identificación de tecnologías y stacks técnicos mencionados
         - Normalización de datos de candidatos
         - Detección de patrones en CVs técnicos

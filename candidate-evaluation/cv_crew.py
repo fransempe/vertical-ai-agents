@@ -36,9 +36,10 @@ def create_cv_analysis_crew(filename: str, user_id: str = None, client_id: str =
            - Nombre y apellido del candidato
            - Email de contacto
            - Teléfono de contacto
+           - LinkedIn: URL del perfil de LinkedIn (si está presente en el CV)
            - Tech_stack: Array con todas las tecnologías, lenguajes, frameworks y herramientas mencionadas
         6. Crea o actualiza el candidato en la tabla 'candidates' usando la herramienta create_candidate, con los campos:
-           - name, email, phone, tech_stack (array)
+           - name, email, phone, linkedin (si está disponible), tech_stack (array)
            - cv_url: Construir como "https://hhrr-ai-multiagents.s3.us-east-1.amazonaws.com/cvs/{filename}"
            {f" - user_id: {user_id}, client_id: {client_id} (IMPORTANTE: incluir estos parámetros si están disponibles)" if user_id and client_id else ""}
         7. Confirma el resultado del upsert devolviendo el ID o el registro creado
@@ -55,6 +56,7 @@ def create_cv_analysis_crew(filename: str, user_id: str = None, client_id: str =
         Nombre y Apellido: [nombre completo extraído]
         Email: [email extraído o "No especificado"]
         Teléfono: [teléfono extraído o "No especificado"]
+        LinkedIn: [URL de LinkedIn extraída o "No especificado"]
         
         💻 TECH STACK:
         --------------
@@ -80,7 +82,8 @@ def create_cv_analysis_crew(filename: str, user_id: str = None, client_id: str =
         Un reporte estructurado con:
         - Nombre y apellido del candidato
         - Email de contacto
-        - Teléfono de contacto  
+        - Teléfono de contacto
+        - LinkedIn (si está disponible)
         - Tech_stack en formato de array o lista
         - Resultado de creación/actualización en Supabase (candidates)
         Todo presentado de forma clara y legible

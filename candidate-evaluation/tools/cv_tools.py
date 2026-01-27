@@ -404,12 +404,18 @@ def extract_candidate_data(cv_text: str) -> str:
         # Patrones regex básicos para ayudar al agente
         email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
         phone_pattern = r'[\+]?[(]?[0-9]{1,4}[)]?[-\s\.]?[(]?[0-9]{1,4}[)]?[-\s\.]?[0-9]{1,4}[-\s\.]?[0-9]{1,9}'
+        linkedin_pattern = r'(?:https?://)?(?:www\.)?linkedin\.com/(?:in|profile)/[\w\-]+/?'
         
         # Buscar emails
         emails = re.findall(email_pattern, cv_text)
         
         # Buscar teléfonos
         phones = re.findall(phone_pattern, cv_text)
+        
+        # Buscar LinkedIn
+        linkedin_urls = re.findall(linkedin_pattern, cv_text, re.IGNORECASE)
+        # Normalizar URLs de LinkedIn (agregar https:// si falta)
+        linkedin_urls = [url if url.startswith('http') else f'https://{url}' for url in linkedin_urls]
         
         # Tecnologías comunes (lista base para ayudar al agente)
         common_techs = [
@@ -435,6 +441,7 @@ def extract_candidate_data(cv_text: str) -> str:
             "extracted_hints": {
                 "emails_found": emails,
                 "phones_found": phones,
+                "linkedin_urls_found": linkedin_urls,
                 "technologies_found": found_techs
             },
             "note": "Use estos hints para ayudarte a extraer y estructurar los datos del candidato"
