@@ -28,7 +28,7 @@ from supabase import create_client
 from tracking import TokenTracker
 from tools.token_estimator import estimate_cost, estimate_task_tokens, estimate_completion_tokens, breakdown_context_tokens
 from tools.supabase_tools import get_meet_evaluation_data, save_meet_evaluation, get_client_email
-from tools.elevenlabs_tools import create_elevenlabs_agent
+from tools.elevenlabs_tools import create_elevenlabs_agent, generate_elevenlabs_prompt_from_jd, update_elevenlabs_agent_prompt
 from agents import create_single_meet_evaluator_agent
 from tasks import create_single_meet_extraction_task, create_single_meet_evaluation_task
 
@@ -1383,6 +1383,9 @@ async def handle_outlook_notifications(payload: dict):
 class CreateAgentRequest(BaseModel):
     jd_interview_id: str
 
+class UpdateAgentRequest(BaseModel):
+    jd_interview_id: str
+
 class CreateAgentResponse(BaseModel):
     status: str
     message: str
@@ -1607,6 +1610,159 @@ Tu objetivo: {evaluator_agent.goal}"""
         error_msg = f"Error al estimar tokens: {str(e)}"
         print(f"❌ {error_msg}")
         evaluation_logger.log_error("API", error_msg)
+        raise HTTPException(status_code=500, detail=error_msg)
+
+
+@app.patch("/update-elevenlabs-agent")
+async def update_elevenlabs_agent_endpoint(request: UpdateAgentRequest):
+    """
+    Endpoint que actualiza SOLO el prompt de un agente de ElevenLabs
+    basado en el jd_interview_id (usa la JD actualizada).
+    """
+    try:
+        start_time = datetime.now()
+        jd_interview_id = request.jd_interview_id
+
+        evaluation_logger.log_task_start(
+            "Actualizar Agente ElevenLabs",
+            f"Actualizando prompt para jd_interview_id: {jd_interview_id}"
+        )
+
+        required_env_vars = ["SUPABASE_URL", "SUPABASE_KEY", "ELEVENLABS_API_KEY"]
+        missing_vars = [var for var in required_env_vars if not os.getenv(var)]
+        if missing_vars:
+            error_msg = f"Variables de entorno faltantes: {missing_vars}"
+            evaluation_logger.log_error("API", error_msg)
+            raise HTTPException(status_code=500, detail=error_msg)
+
+        supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
+
+        # 1. Obtener datos del jd_interview (incluye JD y agent_id)
+        jd_response = supabase.table("jd_interviews").select("*").eq("id", jd_interview_id).limit(1).execute()
+        if not jd_response.data or len(jd_response.data) == 0:
+            error_msg = f"No se encontró jd_interview con ID: {jd_interview_id}"
+            evaluation_logger.log_error("API", error_msg)
+            raise HTTPException(status_code=404, detail=error_msg)
+
+        jd_data = jd_response.data[0]
+        job_description = jd_data.get("job_description", "")
+        interview_name = jd_data.get("interview_name", "")
+        client_id = jd_data.get("client_id")
+        agent_id = jd_data.get("agent_id")
+
+        if not job_description:
+            error_msg = f"El jd_interview {jd_interview_id} no tiene job_description"
+            evaluation_logger.log_error("API", error_msg)
+            raise HTTPException(status_code=400, detail=error_msg)
+
+        if not agent_id:
+            error_msg = f"El jd_interview {jd_interview_id} no tiene agent_id asociado"
+            evaluation_logger.log_error("API", error_msg)
+            raise HTTPException(status_code=400, detail=error_msg)
+
+        if not client_id:
+            error_msg = f"El jd_interview {jd_interview_id} no tiene client_id asociado"
+            evaluation_logger.log_error("API", error_msg)
+            raise HTTPException(status_code=400, detail=error_msg)
+
+        # 2. Obtener email del cliente (para generar prompt coherente)
+        func_to_call = None
+        if hasattr(get_client_email, "__wrapped__"):
+            func_to_call = get_client_email.__wrapped__
+        elif hasattr(get_client_email, "func"):
+            func_to_call = get_client_email.func
+        elif hasattr(get_client_email, "_func"):
+            func_to_call = get_client_email._func
+        else:
+            error_msg = "No se pudo acceder a la función get_client_email"
+            evaluation_logger.log_error("API", error_msg)
+            raise HTTPException(status_code=500, detail=error_msg)
+
+        client_email_result = func_to_call(client_id)
+        client_email_data = json.loads(client_email_result) if isinstance(client_email_result, str) else client_email_result
+
+        if "error" in client_email_data:
+            error_msg = f"Error obteniendo email del cliente: {client_email_data.get('error')}"
+            evaluation_logger.log_error("API", error_msg)
+            raise HTTPException(status_code=400, detail=error_msg)
+
+        sender_email = client_email_data.get("email", "")
+        if not sender_email:
+            error_msg = f"El cliente {client_id} no tiene email configurado"
+            evaluation_logger.log_error("API", error_msg)
+            raise HTTPException(status_code=400, detail=error_msg)
+
+        # 3. Generar nuevo prompt base a partir de la JD actualizada
+        prompt_data = generate_elevenlabs_prompt_from_jd(
+            interview_name=interview_name,
+            job_description=job_description,
+            sender_email=sender_email,
+        )
+        generated_prompt = prompt_data.get("prompt", "").strip()
+        if not generated_prompt:
+            error_msg = "No se pudo generar un nuevo prompt para ElevenLabs"
+            evaluation_logger.log_error("API", error_msg)
+            raise HTTPException(status_code=500, detail=error_msg)
+
+        # 3b. Asegurar que se mantenga la misma estructura obligatoria de entrevista
+        estructura_obligatoria = """
+
+**ESTRUCTURA OBLIGATORIA DE LA ENTREVISTA:**
+
+Debes realizar EXACTAMENTE las siguientes preguntas en este orden:
+
+1. **2 PREGUNTAS DE HABILIDADES BLANDAS:**
+   - Realiza 2 preguntas sobre habilidades blandas del candidato
+   - Ejemplos: comunicación, trabajo en equipo, liderazgo, resolución de problemas, adaptabilidad, gestión del tiempo
+   - Estas preguntas deben evaluar las competencias interpersonales y profesionales del candidato
+   - Haz una pregunta a la vez y espera la respuesta antes de continuar
+
+2. **5 PREGUNTAS TÉCNICAS DEL PUESTO:**
+   - Realiza 5 preguntas técnicas específicas basadas en la descripción del puesto
+   - Las preguntas deben estar directamente relacionadas con las tecnologías, herramientas y conocimientos técnicos mencionados en la descripción del puesto
+   - Sé específico y técnico, evaluando el conocimiento real del candidato
+   - Haz una pregunta a la vez y espera la respuesta antes de continuar
+
+**REGLAS IMPORTANTES:**
+- Mantén un tono profesional pero amigable
+- Evalúa las respuestas del candidato de manera objetiva
+- Guía la conversación de manera estructurada
+- Responde en español de manera clara y concisa
+- NO hagas más de 2 preguntas de habilidades blandas
+- NO hagas más de 5 preguntas técnicas
+- Al finalizar las 7 preguntas, agradece al candidato y cierra la entrevista"""
+
+        full_prompt_text = generated_prompt + estructura_obligatoria
+
+        # 4. Actualizar el agente en ElevenLabs usando solo el prompt
+        update_result = update_elevenlabs_agent_prompt(agent_id=str(agent_id), prompt_text=full_prompt_text)
+        if not update_result:
+            error_msg = "No se pudo actualizar el agente de ElevenLabs"
+            evaluation_logger.log_error("API", error_msg)
+            raise HTTPException(status_code=500, detail=error_msg)
+
+        execution_time = str(datetime.now() - start_time)
+        evaluation_logger.log_task_complete(
+            "Actualizar Agente ElevenLabs",
+            f"Agente {agent_id} actualizado exitosamente en {execution_time}"
+        )
+
+        return {
+            "status": "success",
+            "message": "Agente de ElevenLabs actualizado correctamente con la JD actualizada",
+            "jd_interview_id": jd_interview_id,
+            "agent_id": str(agent_id),
+            "timestamp": datetime.now().isoformat(),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        error_msg = f"Error al actualizar agente de ElevenLabs: {str(e)}"
+        print(f"❌ {error_msg}")
+        evaluation_logger.log_error("API", error_msg)
+        import traceback
+        evaluation_logger.log_error("API", f"Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=error_msg)
 
 @app.post("/create-elevenlabs-agent", response_model=CreateAgentResponse)

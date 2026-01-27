@@ -259,3 +259,69 @@ Debes realizar EXACTAMENTE las siguientes preguntas en este orden:
         evaluation_logger.log_error("Crear Agente ElevenLabs", f"Traceback: {traceback.format_exc()}")
         return None
 
+
+def update_elevenlabs_agent_prompt(agent_id: str, prompt_text: str) -> Optional[Dict[str, Any]]:
+    """
+    Actualiza únicamente el prompt de un agente existente de ElevenLabs.
+
+    Args:
+        agent_id: ID del agente en ElevenLabs
+        prompt_text: Nuevo prompt completo a aplicar al agente
+
+    Returns:
+        Diccionario con la respuesta de ElevenLabs o None si falla
+    """
+    try:
+        evaluation_logger.log_task_start(
+            "Actualizar Agente ElevenLabs",
+            f"Actualizando prompt del agente: {agent_id}"
+        )
+
+        api_key = os.getenv("ELEVENLABS_API_KEY")
+        if not api_key:
+            raise ValueError("ELEVENLABS_API_KEY no está configurada")
+
+        client = ElevenLabs(
+            api_key=api_key,
+            base_url="https://api.elevenlabs.io"
+        )
+
+        # Realizar PATCH para actualizar solo el prompt
+        response = client.conversational_ai.agents.update(
+            agent_id=agent_id,
+            conversation_config={
+                "agent": {
+                    "prompt": {
+                        "prompt": prompt_text
+                    }
+                }
+            }
+        )
+
+        # Convertir respuesta a diccionario si es necesario
+        result_dict: Optional[Dict[str, Any]] = None
+        if hasattr(response, "dict"):
+            result_dict = response.dict()
+        elif hasattr(response, "__dict__"):
+            result_dict = response.__dict__
+        else:
+            result_dict = {"agent_id": agent_id, "result": str(response)}
+
+        evaluation_logger.log_task_complete(
+            "Actualizar Agente ElevenLabs",
+            f"Prompt actualizado correctamente para agent_id={agent_id}"
+        )
+
+        return result_dict
+
+    except Exception as e:
+        evaluation_logger.log_error(
+            "Actualizar Agente ElevenLabs",
+            f"Error actualizando agente {agent_id}: {str(e)}"
+        )
+        import traceback
+        evaluation_logger.log_error(
+            "Actualizar Agente ElevenLabs",
+            f"Traceback: {traceback.format_exc()}"
+        )
+        return None
