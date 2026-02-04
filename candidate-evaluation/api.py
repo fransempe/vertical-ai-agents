@@ -14,7 +14,7 @@ import threading
 from datetime import datetime
 from pathlib import Path
 from contextlib import asynccontextmanager
-from typing import Dict, Optional
+from typing import Dict, Optional, List, Any
 from fastapi import FastAPI, HTTPException, Request, BackgroundTasks, Response
 import httpx
 from pydantic import BaseModel
@@ -29,6 +29,7 @@ from tracking import TokenTracker
 from tools.token_estimator import estimate_cost, estimate_task_tokens, estimate_completion_tokens, breakdown_context_tokens
 from tools.supabase_tools import get_meet_evaluation_data, save_meet_evaluation, get_client_email
 from tools.elevenlabs_tools import create_elevenlabs_agent, generate_elevenlabs_prompt_from_jd, update_elevenlabs_agent_prompt
+from tools.vector_tools import search_similar_chunks, get_supabase_client
 from agents import create_single_meet_evaluator_agent
 from tasks import create_single_meet_extraction_task, create_single_meet_evaluation_task
 
@@ -553,8 +554,10 @@ def do_matching_long_task(run_id: str, user_id: Optional[str], client_id: Option
         # Log inicio del proceso
         if user_id and client_id:
             evaluation_logger.log_task_start("Matching API", f"Iniciando proceso de matching filtrado por user_id: {user_id}, client_id: {client_id}")
+            print(f"[MATCHING API] 🚀 Iniciando matching con filtros - user_id: {user_id}, client_id: {client_id}")
         else:
             evaluation_logger.log_task_start("Matching API", "Iniciando proceso de matching (sin filtros)")
+            print(f"[MATCHING API] 🚀 Iniciando matching SIN filtros (todos los candidatos)")
         
         matching_runs[run_id] = {
             "status": "running",
@@ -563,8 +566,10 @@ def do_matching_long_task(run_id: str, user_id: Optional[str], client_id: Option
             "runId": run_id
         }
         
+        print(f"[MATCHING API] 📋 Creando crew de matching...")
         # Crear y ejecutar crew de matching
         crew = create_candidate_matching_crew(user_id=user_id, client_id=client_id)
+        print(f"[MATCHING API] ✅ Crew creado, iniciando matching...")
         
         matching_runs[run_id] = {
             "status": "running",
@@ -594,7 +599,13 @@ def do_matching_long_task(run_id: str, user_id: Optional[str], client_id: Option
             result_text = result.raw
         
         # Log del resultado para debugging
-        evaluation_logger.log_task_progress("Matching API", f"Resultado del agente: {result_text[:500]}...")
+        evaluation_logger.log_task_progress("Matching API", f"Longitud del resultado: {len(result_text)} caracteres")
+        evaluation_logger.log_task_progress("Matching API", f"Primeros 500 caracteres: {result_text[:500]}")
+        evaluation_logger.log_task_progress("Matching API", f"Últimos 200 caracteres: {result_text[-200:]}")
+        if '"matches"' in result_text:
+            evaluation_logger.log_task_progress("Matching API", "El resultado contiene 'matches'")
+        else:
+            evaluation_logger.log_task_progress("Matching API", "⚠️ El resultado NO contiene 'matches'")
         
         # Intentar parsear el resultado como JSON
         matches_data = None
@@ -604,17 +615,66 @@ def do_matching_long_task(run_id: str, user_id: Optional[str], client_id: Option
         except json.JSONDecodeError:
             evaluation_logger.log_task_progress("Matching API", "Resultado no es JSON válido, intentando extraer datos del texto")
             
-            # Intentar extraer JSON del texto usando regex
-            json_pattern = r'\{.*"matches".*\}'
-            json_matches = re.findall(json_pattern, result_text, re.DOTALL)
+            # Intentar extraer JSON del texto usando múltiples estrategias
+            json_extracted = None
             
-            if json_matches:
+            # Estrategia 1: Buscar JSON dentro de bloques de código markdown (```json ... ```)
+            markdown_json_pattern = r'```(?:json)?\s*(\{.*?"matches".*?\})\s*```'
+            markdown_matches = re.findall(markdown_json_pattern, result_text, re.DOTALL)
+            if markdown_matches:
                 try:
-                    matches_data = json.loads(json_matches[0])
-                    evaluation_logger.log_task_progress("Matching API", "JSON extraído del texto exitosamente")
+                    json_extracted = json.loads(markdown_matches[0])
+                    evaluation_logger.log_task_progress("Matching API", "JSON extraído de bloque markdown exitosamente")
                 except json.JSONDecodeError:
-                    evaluation_logger.log_task_progress("Matching API", "No se pudo extraer JSON válido del texto")
-                    matches_data = None
+                    pass
+            
+            # Estrategia 2: Buscar JSON que contenga "matches" usando búsqueda de llaves balanceadas
+            if not json_extracted:
+                # Encontrar todas las posiciones donde aparece "matches"
+                matches_positions = [m.start() for m in re.finditer(r'"matches"', result_text)]
+                for match_pos in matches_positions:
+                    # Buscar hacia atrás para encontrar el { inicial
+                    start_pos = result_text.rfind('{', 0, match_pos)
+                    if start_pos == -1:
+                        continue
+                    
+                    # Buscar hacia adelante para encontrar el } final balanceado
+                    brace_count = 0
+                    end_pos = -1
+                    for i in range(start_pos, len(result_text)):
+                        if result_text[i] == '{':
+                            brace_count += 1
+                        elif result_text[i] == '}':
+                            brace_count -= 1
+                            if brace_count == 0:
+                                end_pos = i
+                                break
+                    
+                    if end_pos != -1:
+                        potential_json = result_text[start_pos:end_pos + 1]
+                        try:
+                            json_extracted = json.loads(potential_json)
+                            evaluation_logger.log_task_progress("Matching API", "JSON extraído del texto usando búsqueda balanceada exitosamente")
+                            break
+                        except json.JSONDecodeError:
+                            continue
+            
+            # Estrategia 3: Buscar desde el primer { hasta el último } que contenga "matches"
+            if not json_extracted:
+                first_brace = result_text.find('{')
+                last_brace = result_text.rfind('}')
+                if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+                    potential_json = result_text[first_brace:last_brace + 1]
+                    if '"matches"' in potential_json:
+                        try:
+                            json_extracted = json.loads(potential_json)
+                            evaluation_logger.log_task_progress("Matching API", "JSON extraído usando estrategia de búsqueda de llaves exitosamente")
+                        except json.JSONDecodeError:
+                            pass
+            
+            matches_data = json_extracted
+            if not matches_data:
+                evaluation_logger.log_task_progress("Matching API", "No se pudo extraer JSON válido del texto")
         
         # Extraer la lista de matches
         matches_list = []
@@ -1398,14 +1458,22 @@ class TokenEstimationResponse(BaseModel):
     status: str
     message: str
     meet_id: str
-    model: str
-    estimated_input_tokens: int
-    estimated_completion_tokens: int
-    estimated_total_tokens: int
-    estimated_input_cost_usd: float
-    estimated_completion_cost_usd: float
-    estimated_total_cost_usd: float
-    timestamp: str
+
+class ChatbotRequest(BaseModel):
+    message: str
+    conversation_history: Optional[List[Dict[str, str]]] = []
+
+class ChatbotResponse(BaseModel):
+    response: str
+    sources: Optional[List[Dict[str, Any]]] = []
+    model: Optional[str] = None
+    estimated_input_tokens: Optional[int] = None
+    estimated_completion_tokens: Optional[int] = None
+    estimated_total_tokens: Optional[int] = None
+    estimated_input_cost_usd: Optional[float] = None
+    estimated_completion_cost_usd: Optional[float] = None
+    estimated_total_cost_usd: Optional[float] = None
+    timestamp: Optional[str] = None
 
 @app.post("/estimate-meet-tokens", response_model=TokenEstimationResponse)
 async def estimate_meet_tokens(request: SingleMeetRequest):
@@ -1746,6 +1814,15 @@ Debes realizar EXACTAMENTE las siguientes preguntas en este orden:
             "Actualizar Agente ElevenLabs",
             f"Agente {agent_id} actualizado exitosamente en {execution_time}"
         )
+        
+        # Indexar JD Interview actualizada en knowledge base (indexación incremental)
+        try:
+            from tools.vector_tools import index_jd_interview
+            index_jd_interview(jd_data)
+            evaluation_logger.log_task_progress("Actualizar Agente ElevenLabs", f"JD Interview re-indexada en knowledge base: {jd_interview_id}")
+        except Exception as index_error:
+            # No fallar si falla la indexación
+            evaluation_logger.log_error("Actualizar Agente ElevenLabs", f"Error re-indexando JD Interview: {str(index_error)}")
 
         return {
             "status": "success",
@@ -1914,6 +1991,16 @@ async def create_elevenlabs_agent_endpoint(request: CreateAgentRequest):
         
         print(f"✅ Registro actualizado exitosamente en jd_interviews")
         
+        # Indexar JD Interview actualizada en knowledge base (indexación incremental)
+        try:
+            from tools.vector_tools import index_jd_interview
+            updated_jd = update_response.data[0]
+            index_jd_interview(updated_jd)
+            evaluation_logger.log_task_progress("Crear Agente ElevenLabs", f"JD Interview re-indexada en knowledge base: {jd_interview_id}")
+        except Exception as index_error:
+            # No fallar si falla la indexación
+            evaluation_logger.log_error("Crear Agente ElevenLabs", f"Error re-indexando JD Interview: {str(index_error)}")
+        
         execution_time = str(datetime.now() - start_time)
         evaluation_logger.log_task_complete("Crear Agente ElevenLabs", f"Agente creado y guardado exitosamente: {agent_id_elevenlabs}")
         
@@ -1934,6 +2021,197 @@ async def create_elevenlabs_agent_endpoint(request: CreateAgentRequest):
         evaluation_logger.log_error("API", error_msg)
         import traceback
         evaluation_logger.log_error("API", f"Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=error_msg)
+
+@app.post("/chatbot", response_model=ChatbotResponse)
+async def chatbot_endpoint(request: ChatbotRequest):
+    """
+    Endpoint del chatbot que usa búsqueda vectorial (RAG) para responder preguntas
+    sobre candidatos, entrevistas y el sistema.
+    
+    Args:
+        request: Objeto con el mensaje del usuario y el historial de conversación
+        
+    Returns:
+        Respuesta del chatbot con contexto relevante de la base de datos
+    """
+    try:
+        start_time = datetime.now()
+        message = request.message
+        conversation_history = request.conversation_history or []
+        
+        evaluation_logger.log_task_start("Chatbot", f"Procesando mensaje: {message[:50]}...")
+        
+        # Verificar variables de entorno
+        if not os.getenv("OPENAI_API_KEY"):
+            raise HTTPException(status_code=500, detail="OPENAI_API_KEY no configurada")
+        
+        # 1. Verificar si hay chunks en la base de datos
+        total_chunks = 0
+        try:
+            supabase = get_supabase_client()
+            count_result = supabase.table('knowledge_chunks').select('id', count='exact').limit(1).execute()
+            total_chunks = count_result.count if hasattr(count_result, 'count') else 0
+            evaluation_logger.log_task_progress("Chatbot", f"Total de chunks en BD: {total_chunks}")
+        except Exception as e:
+            evaluation_logger.log_error("Chatbot", f"Error contando chunks: {str(e)}")
+        
+        # 2. Buscar chunks relevantes usando búsqueda vectorial
+        similar_chunks = []
+        if total_chunks > 0:
+            try:
+                # Intentar con diferentes thresholds, empezando por el más permisivo
+                thresholds = [0.3, 0.4, 0.5]  # Probar con thresholds más bajos
+                for threshold in thresholds:
+                    similar_chunks = search_similar_chunks(
+                        query_text=message,
+                        match_threshold=threshold,
+                        match_count=10,
+                        entity_type_filter=None
+                    )
+                    if len(similar_chunks) > 0:
+                        evaluation_logger.log_task_progress("Chatbot", f"Encontrados {len(similar_chunks)} chunks con threshold {threshold}")
+                        break
+                    else:
+                        evaluation_logger.log_task_progress("Chatbot", f"No se encontraron chunks con threshold {threshold}, intentando siguiente...")
+                
+                if len(similar_chunks) == 0:
+                    evaluation_logger.log_task_progress("Chatbot", "No se encontraron chunks con ningún threshold, pero hay datos en BD")
+            except Exception as e:
+                evaluation_logger.log_error("Chatbot", f"Error en búsqueda vectorial: {str(e)}")
+                import traceback
+                evaluation_logger.log_error("Chatbot", f"Traceback: {traceback.format_exc()}")
+        else:
+            evaluation_logger.log_task_progress("Chatbot", "No hay chunks indexados en la base de datos")
+        
+        # 3. Construir contexto a partir de los chunks
+        context_parts = []
+        sources = []
+        for chunk in similar_chunks:
+            content = chunk.get('content', '')
+            entity_type = chunk.get('entity_type', '')
+            entity_id = chunk.get('entity_id', '')
+            metadata = chunk.get('metadata', {})
+            
+            context_parts.append(content)
+            sources.append({
+                'entity_type': entity_type,
+                'entity_id': entity_id,
+                'metadata': metadata,
+                'content_preview': content[:100] + '...' if len(content) > 100 else content
+            })
+        
+        context = "\n\n".join(context_parts) if context_parts else "No se encontró información relevante en la base de datos."
+        
+        # 4. Construir mensajes para OpenAI
+        has_context = len(context_parts) > 0
+        
+        if has_context:
+            system_prompt = """Eres un asistente experto en el sistema de reclutamiento Agora HR. 
+Ayudas a los usuarios con preguntas sobre candidatos, entrevistas, matching, y funcionalidades del sistema.
+
+INSTRUCCIONES:
+- Responde en español de manera clara y concisa
+- Usa el contexto proporcionado para dar respuestas precisas basadas en los datos reales
+- Proporciona información específica de los candidatos, tecnologías, experiencias, etc. cuando esté disponible en el contexto
+- Sé profesional y amigable
+- Si el contexto menciona IDs o datos técnicos, puedes referenciarlos pero enfócate en la información útil para el usuario"""
+        elif total_chunks > 0:
+            # Hay chunks pero no se encontraron resultados relevantes
+            system_prompt = """Eres un asistente experto en el sistema de reclutamiento Agora HR. 
+Ayudas a los usuarios con preguntas sobre candidatos, entrevistas, matching, y funcionalidades del sistema.
+
+IMPORTANTE: Hay datos indexados en la base de conocimiento ({total_chunks} chunks), pero la búsqueda no encontró resultados relevantes para esta consulta específica.
+
+INSTRUCCIONES:
+- Responde en español de manera clara y concisa
+- Explica que hay datos indexados pero que la consulta no encontró coincidencias específicas
+- Sugiere reformular la pregunta de manera diferente
+- Proporciona información general sobre cómo funciona el sistema
+- Sé profesional y amigable""".format(total_chunks=total_chunks)
+        else:
+            system_prompt = """Eres un asistente experto en el sistema de reclutamiento Agora HR. 
+Ayudas a los usuarios con preguntas sobre candidatos, entrevistas, matching, y funcionalidades del sistema.
+
+IMPORTANTE: Actualmente no hay datos indexados en la base de conocimiento, por lo que no puedo acceder a información específica de candidatos o entrevistas.
+
+INSTRUCCIONES:
+- Responde en español de manera clara y concisa
+- Explica que los datos aún no están indexados y que necesita ejecutar el script de indexación inicial
+- Proporciona información general sobre cómo funciona el sistema
+- Sé profesional y amigable
+- Sugiere que ejecute el script: python agents/candidate-evaluation/scripts/index_initial_data.py"""
+        
+        messages = [
+            {"role": "system", "content": system_prompt}
+        ]
+        
+        # Agregar historial de conversación
+        for msg in conversation_history[-5:]:  # Últimos 5 mensajes
+            role = msg.get('role', 'user')
+            content = msg.get('content', '')
+            if role in ['user', 'assistant'] and content:
+                messages.append({"role": role, "content": content})
+        
+        # Agregar contexto y pregunta actual
+        if context_parts:
+            messages.append({
+                "role": "system",
+                "content": f"CONTEXTO RELEVANTE DE LA BASE DE DATOS:\n{context}\n\nUsa esta información para responder la pregunta del usuario de manera específica y detallada."
+            })
+        else:
+            # Si no hay contexto, agregar información sobre el estado del sistema
+            messages.append({
+                "role": "system",
+                "content": "NOTA: No se encontraron datos indexados en la base de conocimiento. Esto significa que aún no se han indexado los candidatos y JD Interviews. Para que el chatbot funcione correctamente, es necesario ejecutar el script de indexación inicial."
+            })
+        
+        messages.append({
+            "role": "user",
+            "content": message
+        })
+        
+        # 4. Llamar a OpenAI
+        from openai import OpenAI
+        openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        
+        response = openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=messages,
+            temperature=0.7,
+            max_tokens=500
+        )
+        
+        bot_response = response.choices[0].message.content
+        
+        # Extraer información de tokens y costos de la respuesta de OpenAI
+        usage = response.usage
+        model_used = response.model
+        
+        execution_time = str(datetime.now() - start_time)
+        evaluation_logger.log_task_complete("Chatbot", f"Respuesta generada en {execution_time}")
+        
+        return ChatbotResponse(
+            response=bot_response,
+            sources=sources[:3] if sources else [],  # Máximo 3 fuentes
+            model=model_used,
+            estimated_input_tokens=usage.prompt_tokens if usage else None,
+            estimated_completion_tokens=usage.completion_tokens if usage else None,
+            estimated_total_tokens=usage.total_tokens if usage else None,
+            estimated_input_cost_usd=None,  # Opcional, se puede calcular después
+            estimated_completion_cost_usd=None,  # Opcional, se puede calcular después
+            estimated_total_cost_usd=None,  # Opcional, se puede calcular después
+            timestamp=datetime.now().isoformat()
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        error_msg = f"Error en chatbot: {str(e)}"
+        print(f"❌ {error_msg}")
+        evaluation_logger.log_error("Chatbot", error_msg)
+        import traceback
+        evaluation_logger.log_error("Chatbot", f"Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=error_msg)
 
 if __name__ == "__main__":
