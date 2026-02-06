@@ -10,6 +10,7 @@ import re
 import requests
 import tiktoken
 import uuid
+from uuid import UUID
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -1475,6 +1476,15 @@ class ChatbotResponse(BaseModel):
     estimated_total_cost_usd: Optional[float] = None
     timestamp: Optional[str] = None
 
+class CandidateInfoResponse(BaseModel):
+    status: str
+    message: str
+    timestamp: str
+    candidate: Optional[Dict[str, Any]] = None
+    candidates: Optional[List[Dict[str, Any]]] = None  # Para búsquedas por nombre
+    related_meets: Optional[List[Dict[str, Any]]] = None
+    related_evaluations: Optional[List[Dict[str, Any]]] = None
+
 @app.post("/estimate-meet-tokens", response_model=TokenEstimationResponse)
 async def estimate_meet_tokens(request: SingleMeetRequest):
     """
@@ -2212,6 +2222,195 @@ INSTRUCCIONES:
         evaluation_logger.log_error("Chatbot", error_msg)
         import traceback
         evaluation_logger.log_error("Chatbot", f"Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=error_msg)
+
+@app.get("/get-candidate-info", response_model=CandidateInfoResponse)
+async def get_candidate_info(
+    candidate_id: Optional[str] = None,
+    meet_id: Optional[str] = None,
+    token: Optional[str] = None,
+    email: Optional[str] = None,
+    name: Optional[str] = None,
+    include_related: bool = True
+):
+    """
+    Endpoint para obtener información de candidatos.
+    Diseñado para ser usado como herramienta por ElevenLabs Agents.
+    
+    Args:
+        candidate_id: ID único del candidato (UUID)
+        meet_id: ID del meet (obtiene el candidate_id desde el meet)
+        token: Token del meet (obtiene el candidate_id desde el meet)
+        email: Email del candidato
+        name: Nombre del candidato (puede devolver múltiples resultados)
+        include_related: Si True, incluye información de meets y evaluaciones relacionadas
+        
+    Returns:
+        Información del candidato(s) con datos completos
+    """
+    try:
+        start_time = datetime.now()
+        evaluation_logger.log_task_start("Get Candidate Info", f"Buscando candidato - id: {candidate_id}, meet_id: {meet_id}, token: {token}, email: {email}, name: {name}")
+        
+        # Validar que se proporcione al menos un parámetro
+        if not candidate_id and not meet_id and not token and not email and not name:
+            raise HTTPException(
+                status_code=400,
+                detail="Debe proporcionarse al menos uno de los siguientes parámetros: candidate_id, meet_id, token, email, o name"
+            )
+        
+        supabase = get_supabase_client()
+        candidates_data = []
+        resolved_candidate_id = candidate_id
+        
+        # Si se proporciona meet_id o token, obtener el candidate_id desde el meet
+        if meet_id or token:
+            evaluation_logger.log_task_progress("Get Candidate Info", f"Obteniendo candidate_id desde meet - meet_id: {meet_id}, token: {token}")
+            try:
+                meet_query = supabase.table('meets').select('candidate_id')
+                if meet_id:
+                    meet_query = meet_query.eq('id', meet_id)
+                elif token:
+                    meet_query = meet_query.eq('token', token)
+                
+                meet_response = meet_query.limit(1).execute()
+                
+                if meet_response.data and len(meet_response.data) > 0:
+                    resolved_candidate_id = meet_response.data[0].get('candidate_id')
+                    evaluation_logger.log_task_progress("Get Candidate Info", f"Candidate ID obtenido desde meet: {resolved_candidate_id}")
+                else:
+                    evaluation_logger.log_task_progress("Get Candidate Info", "No se encontró el meet con los parámetros proporcionados")
+            except Exception as e:
+                evaluation_logger.log_error("Get Candidate Info", f"Error obteniendo candidate_id desde meet: {str(e)}")
+        
+        # Buscar por candidate_id (prioridad - puede venir directamente o desde meet)
+        if resolved_candidate_id:
+            evaluation_logger.log_task_progress("Get Candidate Info", f"Buscando por ID: {resolved_candidate_id}")
+            response = supabase.table('candidates').select('*').eq('id', resolved_candidate_id).limit(1).execute()
+            if response.data:
+                candidates_data = response.data
+        # Buscar por email
+        elif email:
+            evaluation_logger.log_task_progress("Get Candidate Info", f"Buscando por email: {email}")
+            response = supabase.table('candidates').select('*').eq('email', email).limit(1).execute()
+            if response.data:
+                candidates_data = response.data
+        # Buscar por name (puede devolver múltiples)
+        elif name:
+            evaluation_logger.log_task_progress("Get Candidate Info", f"Buscando por nombre: {name}")
+            response = supabase.table('candidates').select('*').ilike('name', f'%{name}%').limit(10).execute()
+            if response.data:
+                candidates_data = response.data
+        
+        if not candidates_data:
+            evaluation_logger.log_task_complete("Get Candidate Info", "No se encontraron candidatos")
+            return CandidateInfoResponse(
+                status="not_found",
+                message="No se encontraron candidatos con los criterios proporcionados",
+                timestamp=datetime.now().isoformat()
+            )
+        
+        # Procesar candidatos
+        processed_candidates = []
+        for candidate_row in candidates_data:
+            candidate_info = {
+                "id": candidate_row.get('id'),
+                "name": candidate_row.get('name'),
+                "email": candidate_row.get('email'),
+                "phone": candidate_row.get('phone'),
+                "cv_url": candidate_row.get('cv_url'),
+                "tech_stack": candidate_row.get('tech_stack', []),
+                "linkedin": candidate_row.get('linkedin'),
+                "observations": candidate_row.get('observations'),
+                "created_at": candidate_row.get('created_at'),
+                "updated_at": candidate_row.get('updated_at')
+            }
+            
+            # Si include_related es True, obtener información relacionada
+            if include_related and candidate_row.get('id'):
+                candidate_uuid = candidate_row.get('id')
+                
+                # Obtener meets relacionados
+                try:
+                    meets_response = supabase.table('meets').select(
+                        'id,status,scheduled_at,created_at,jd_interviews_id,jd_interviews(interview_name,tech_stack)'
+                    ).eq('candidate_id', candidate_uuid).order('created_at', desc=True).limit(10).execute()
+                    
+                    related_meets = []
+                    if meets_response.data:
+                        for meet in meets_response.data:
+                            related_meets.append({
+                                "id": meet.get('id'),
+                                "status": meet.get('status'),
+                                "scheduled_at": meet.get('scheduled_at'),
+                                "created_at": meet.get('created_at'),
+                                "jd_interview": {
+                                    "id": meet.get('jd_interviews_id'),
+                                    "interview_name": meet.get('jd_interviews', {}).get('interview_name') if meet.get('jd_interviews') else None,
+                                    "tech_stack": meet.get('jd_interviews', {}).get('tech_stack') if meet.get('jd_interviews') else None
+                                } if meet.get('jd_interviews') else None
+                            })
+                        candidate_info["related_meets"] = related_meets
+                except Exception as e:
+                    evaluation_logger.log_error("Get Candidate Info", f"Error obteniendo meets: {str(e)}")
+                    candidate_info["related_meets"] = []
+                
+                # Obtener evaluaciones relacionadas
+                try:
+                    evals_response = supabase.table('meet_evaluations').select(
+                        'id,meet_id,conversation_analysis,technical_assessment,completeness_summary,alerts,match_evaluation,created_at'
+                    ).eq('candidate_id', candidate_uuid).order('created_at', desc=True).limit(5).execute()
+                    
+                    related_evaluations = []
+                    if evals_response.data:
+                        for eval_record in evals_response.data:
+                            related_evaluations.append({
+                                "id": eval_record.get('id'),
+                                "meet_id": eval_record.get('meet_id'),
+                                "conversation_analysis": eval_record.get('conversation_analysis'),
+                                "technical_assessment": eval_record.get('technical_assessment'),
+                                "completeness_summary": eval_record.get('completeness_summary'),
+                                "alerts": eval_record.get('alerts'),
+                                "match_evaluation": eval_record.get('match_evaluation'),
+                                "created_at": eval_record.get('created_at')
+                            })
+                        candidate_info["related_evaluations"] = related_evaluations
+                except Exception as e:
+                    evaluation_logger.log_error("Get Candidate Info", f"Error obteniendo evaluaciones: {str(e)}")
+                    candidate_info["related_evaluations"] = []
+            
+            processed_candidates.append(candidate_info)
+        
+        execution_time = str(datetime.now() - start_time)
+        evaluation_logger.log_task_complete("Get Candidate Info", f"Información obtenida exitosamente en {execution_time}")
+        
+        # Si es búsqueda por ID, meet_id, token o email (un solo resultado)
+        if resolved_candidate_id or candidate_id or meet_id or token or email:
+            return CandidateInfoResponse(
+                status="success",
+                message=f"Información del candidato obtenida exitosamente",
+                timestamp=datetime.now().isoformat(),
+                candidate=processed_candidates[0] if processed_candidates else None,
+                related_meets=processed_candidates[0].get("related_meets") if processed_candidates and processed_candidates[0].get("related_meets") else None,
+                related_evaluations=processed_candidates[0].get("related_evaluations") if processed_candidates and processed_candidates[0].get("related_evaluations") else None
+            )
+        # Si es búsqueda por nombre (múltiples resultados)
+        else:
+            return CandidateInfoResponse(
+                status="success",
+                message=f"Se encontraron {len(processed_candidates)} candidatos",
+                timestamp=datetime.now().isoformat(),
+                candidates=processed_candidates
+            )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        error_msg = f"Error obteniendo información del candidato: {str(e)}"
+        print(f"❌ {error_msg}")
+        evaluation_logger.log_error("Get Candidate Info", error_msg)
+        import traceback
+        evaluation_logger.log_error("Get Candidate Info", f"Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=error_msg)
 
 if __name__ == "__main__":
