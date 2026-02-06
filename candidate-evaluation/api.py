@@ -2310,74 +2310,34 @@ async def get_candidate_info(
                 timestamp=datetime.now().isoformat()
             )
         
-        # Procesar candidatos
+        # Procesar candidatos - Respuesta acortada: solo nombre, skills y experiencia
         processed_candidates = []
         for candidate_row in candidates_data:
-            candidate_info = {
-                "id": candidate_row.get('id'),
-                "name": candidate_row.get('name'),
-                "email": candidate_row.get('email'),
-                "phone": candidate_row.get('phone'),
-                "cv_url": candidate_row.get('cv_url'),
-                "tech_stack": candidate_row.get('tech_stack', []),
-                "linkedin": candidate_row.get('linkedin'),
-                "observations": candidate_row.get('observations'),
-                "created_at": candidate_row.get('created_at'),
-                "updated_at": candidate_row.get('updated_at')
-            }
+            # Extraer nombre completo
+            full_name = candidate_row.get('name', '')
             
-            # Si include_related es True, obtener información relacionada
-            if include_related and candidate_row.get('id'):
-                candidate_uuid = candidate_row.get('id')
-                
-                # Obtener meets relacionados
-                try:
-                    meets_response = supabase.table('meets').select(
-                        'id,status,scheduled_at,created_at,jd_interviews_id,jd_interviews(interview_name,tech_stack)'
-                    ).eq('candidate_id', candidate_uuid).order('created_at', desc=True).limit(10).execute()
-                    
-                    related_meets = []
-                    if meets_response.data:
-                        for meet in meets_response.data:
-                            related_meets.append({
-                                "id": meet.get('id'),
-                                "status": meet.get('status'),
-                                "scheduled_at": meet.get('scheduled_at'),
-                                "created_at": meet.get('created_at'),
-                                "jd_interview": {
-                                    "id": meet.get('jd_interviews_id'),
-                                    "interview_name": meet.get('jd_interviews', {}).get('interview_name') if meet.get('jd_interviews') else None,
-                                    "tech_stack": meet.get('jd_interviews', {}).get('tech_stack') if meet.get('jd_interviews') else None
-                                } if meet.get('jd_interviews') else None
-                            })
-                        candidate_info["related_meets"] = related_meets
-                except Exception as e:
-                    evaluation_logger.log_error("Get Candidate Info", f"Error obteniendo meets: {str(e)}")
-                    candidate_info["related_meets"] = []
-                
-                # Obtener evaluaciones relacionadas
-                try:
-                    evals_response = supabase.table('meet_evaluations').select(
-                        'id,meet_id,conversation_analysis,technical_assessment,completeness_summary,alerts,match_evaluation,created_at'
-                    ).eq('candidate_id', candidate_uuid).order('created_at', desc=True).limit(5).execute()
-                    
-                    related_evaluations = []
-                    if evals_response.data:
-                        for eval_record in evals_response.data:
-                            related_evaluations.append({
-                                "id": eval_record.get('id'),
-                                "meet_id": eval_record.get('meet_id'),
-                                "conversation_analysis": eval_record.get('conversation_analysis'),
-                                "technical_assessment": eval_record.get('technical_assessment'),
-                                "completeness_summary": eval_record.get('completeness_summary'),
-                                "alerts": eval_record.get('alerts'),
-                                "match_evaluation": eval_record.get('match_evaluation'),
-                                "created_at": eval_record.get('created_at')
-                            })
-                        candidate_info["related_evaluations"] = related_evaluations
-                except Exception as e:
-                    evaluation_logger.log_error("Get Candidate Info", f"Error obteniendo evaluaciones: {str(e)}")
-                    candidate_info["related_evaluations"] = []
+            # Extraer skills (tech_stack)
+            tech_stack = candidate_row.get('tech_stack', [])
+            skills = tech_stack if isinstance(tech_stack, list) else []
+            
+            # Extraer experiencia desde observations
+            observations = candidate_row.get('observations', {})
+            experience = None
+            if isinstance(observations, dict):
+                # Buscar work_experience en observations
+                work_experience = observations.get('work_experience')
+                if work_experience:
+                    experience = work_experience
+                # Si no hay work_experience, intentar con otros campos relevantes
+                elif observations.get('other'):
+                    experience = observations.get('other')
+            
+            # Construir respuesta simplificada
+            candidate_info = {
+                "name": full_name,
+                "skills": skills,
+                "experience": experience
+            }
             
             processed_candidates.append(candidate_info)
         
@@ -2390,9 +2350,7 @@ async def get_candidate_info(
                 status="success",
                 message=f"Información del candidato obtenida exitosamente",
                 timestamp=datetime.now().isoformat(),
-                candidate=processed_candidates[0] if processed_candidates else None,
-                related_meets=processed_candidates[0].get("related_meets") if processed_candidates and processed_candidates[0].get("related_meets") else None,
-                related_evaluations=processed_candidates[0].get("related_evaluations") if processed_candidates and processed_candidates[0].get("related_evaluations") else None
+                candidate=processed_candidates[0] if processed_candidates else None
             )
         # Si es búsqueda por nombre (múltiples resultados)
         else:
