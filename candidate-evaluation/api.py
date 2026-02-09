@@ -2307,7 +2307,7 @@ async def get_candidate_info(
         import traceback
         evaluation_logger.log_error("Get Candidate Info", f"Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=error_msg)
- 
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
