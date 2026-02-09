@@ -11,6 +11,7 @@ import requests
 import tiktoken
 import uuid
 from uuid import UUID
+from utils.helpers import clean_uuid, is_valid_uuid
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -46,14 +47,6 @@ OUTLOOK_USER_ID = os.getenv("OUTLOOK_USER_ID", "")
 
 # ====== Validations ======
 
-def _is_valid_uuid(value: str | None) -> bool:
-    if not value or not isinstance(value, (str, bytes)):
-        return False
-    try:
-        UUID(str(value))
-        return True
-    except Exception:
-        return False
 
 
 # ====== Helpers ======
@@ -294,7 +287,7 @@ async def trigger_analysis(request: AnalysisRequest = None):
         # Log inicio del proceso
         jd_interview_id = request.jd_interview_id if request else None
         if jd_interview_id:
-            if not _is_valid_uuid(jd_interview_id):
+            if not is_valid_uuid(jd_interview_id):
                 evaluation_logger.log_error("API", f"jd_interview_id inválido recibido: {jd_interview_id}")
                 raise HTTPException(status_code=400, detail=f"jd_interview_id inválido: {jd_interview_id}")
             evaluation_logger.log_task_start("API", f"Iniciando proceso de análisis filtrado por jd_interview_id: {jd_interview_id}")
@@ -2261,22 +2254,30 @@ async def get_candidate_info(
         
         supabase = get_supabase_client()
         candidates_data = []
-        resolved_candidate_id = candidate_id
+        
+        # Limpiar y validar UUIDs de entrada
+        cleaned_candidate_id = clean_uuid(candidate_id)
+        cleaned_meet_id = clean_uuid(meet_id)
+        cleaned_token = token.strip() if token else None
+        
+        resolved_candidate_id = cleaned_candidate_id
         
         # Si se proporciona meet_id o token, obtener el candidate_id desde el meet
-        if meet_id or token:
-            evaluation_logger.log_task_progress("Get Candidate Info", f"Obteniendo candidate_id desde meet - meet_id: {meet_id}, token: {token}")
+        if cleaned_meet_id or cleaned_token:
+            evaluation_logger.log_task_progress("Get Candidate Info", f"Obteniendo candidate_id desde meet - meet_id: {cleaned_meet_id}, token: {cleaned_token}")
             try:
                 meet_query = supabase.table('meets').select('candidate_id')
-                if meet_id:
-                    meet_query = meet_query.eq('id', meet_id)
-                elif token:
-                    meet_query = meet_query.eq('token', token)
+                if cleaned_meet_id:
+                    meet_query = meet_query.eq('id', cleaned_meet_id)
+                elif cleaned_token:
+                    meet_query = meet_query.eq('token', cleaned_token)
                 
                 meet_response = meet_query.limit(1).execute()
                 
                 if meet_response.data and len(meet_response.data) > 0:
-                    resolved_candidate_id = meet_response.data[0].get('candidate_id')
+                    candidate_id_from_meet = meet_response.data[0].get('candidate_id')
+                    # Limpiar también el candidate_id obtenido de la BD
+                    resolved_candidate_id = clean_uuid(candidate_id_from_meet) if candidate_id_from_meet else None
                     evaluation_logger.log_task_progress("Get Candidate Info", f"Candidate ID obtenido desde meet: {resolved_candidate_id}")
                 else:
                     evaluation_logger.log_task_progress("Get Candidate Info", "No se encontró el meet con los parámetros proporcionados")
