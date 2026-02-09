@@ -3,7 +3,7 @@ import json
 import requests
 import time
 from datetime import datetime
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from crewai.tools import tool
 from supabase import create_client, Client
 from dotenv import load_dotenv
@@ -446,15 +446,20 @@ def get_all_jd_interviews(client_id: str = None) -> str:
                 "interview_name": row.get('interview_name'),
                 "agent_id": row.get('agent_id'),
                 "job_description": row.get('job_description'),
+                "tech_stack": row.get('tech_stack'),
                 "client_id": row.get('client_id'),
                 "created_at": row.get('created_at')
             }
             interviews.append(interview)
+            # Print para debugging - verificar datos reales de BD
+            print(f"[MATCHING DEBUG] 📋 JD Interview obtenido de BD: id={interview['id']}, interview_name={interview['interview_name']}, agent_id={interview['agent_id']}")
         
         if client_id:
             evaluation_logger.log_task_complete("Obtener JD Interviews", f"{len(interviews)} entrevistas obtenidas para client_id: {client_id}")
         else:
             evaluation_logger.log_task_complete("Obtener Todas las JD Interviews", f"{len(interviews)} entrevistas obtenidas")
+        
+        print(f"[MATCHING DEBUG] ✅ Total de JD Interviews obtenidos: {len(interviews)}")
         return json.dumps(interviews, indent=2)
         
     except Exception as e:
@@ -1003,27 +1008,35 @@ def save_meet_evaluation(full_result: str) -> str:
 
 
 @tool
-def get_candidates_by_recruiter(user_id: str, client_id: str, limit: int = 100) -> str:
+def get_candidates_by_recruiter(user_id: str, client_id: str, limit: Optional[int] = None) -> str:
     """
     Obtiene candidatos filtrados por user_id y client_id desde la tabla candidate_recruiters.
     
     Args:
         user_id: ID del usuario que creó los candidatos
         client_id: ID del cliente asociado
-        limit: Número máximo de candidatos a extraer
+        limit: Número máximo de candidatos a extraer (por defecto 1000)
         
     Returns:
         JSON string con los datos de candidatos filtrados
     """
     try:
-        evaluation_logger.log_task_start("Obtener Candidatos por Recruiter", f"Filtrando por user_id: {user_id}, client_id: {client_id}")
+        # Establecer valor por defecto si limit es None
+        if limit is None:
+            limit = 1000
+        
+        evaluation_logger.log_task_start("Obtener Candidatos por Recruiter", f"Filtrando por user_id: {user_id}, client_id: {client_id}, limit: {limit}")
+        
+        print(f"[MATCHING DEBUG] 🔍 Buscando candidatos por recruiter - user_id: {user_id}, client_id: {client_id}, limit: {limit}")
         
         url = os.getenv("SUPABASE_URL")
         key = os.getenv("SUPABASE_KEY")
         supabase = create_client(url, key)
         
         # 1. Obtener candidate_ids desde candidate_recruiters
+        print(f"[MATCHING DEBUG] 📊 Consultando tabla candidate_recruiters con user_id={user_id}, client_id={client_id}")
         recruiter_response = supabase.table('candidate_recruiters').select('candidate_id').eq('user_id', user_id).eq('client_id', client_id).execute()
+        print(f"[MATCHING DEBUG] ✅ Encontrados {len(recruiter_response.data) if recruiter_response.data else 0} registros en candidate_recruiters")
         
         if not recruiter_response.data or len(recruiter_response.data) == 0:
             evaluation_logger.log_task_progress("Obtener Candidatos por Recruiter", f"No se encontraron candidatos para user_id: {user_id}, client_id: {client_id}")
@@ -1036,7 +1049,9 @@ def get_candidates_by_recruiter(user_id: str, client_id: str, limit: int = 100) 
             return json.dumps([], indent=2)
         
         # 2. Obtener los candidatos usando los IDs
+        print(f"[MATCHING DEBUG] 📋 Obteniendo {len(candidate_ids)} candidatos de la tabla candidates")
         candidates_response = supabase.table('candidates').select('*').in_('id', candidate_ids).execute()
+        print(f"[MATCHING DEBUG] ✅ Obtenidos {len(candidates_response.data) if candidates_response.data else 0} candidatos de la base de datos")
         
         candidates = []
         for row in candidates_response.data:
@@ -1047,11 +1062,15 @@ def get_candidates_by_recruiter(user_id: str, client_id: str, limit: int = 100) 
                 "phone": row.get('phone'),
                 "cv_url": row.get('cv_url'),
                 "tech_stack": row.get('tech_stack'),
+                "observations": row.get('observations'),
                 "created_at": row.get('created_at')
             }
             candidates.append(candidate)
         
         evaluation_logger.log_task_complete("Obtener Candidatos por Recruiter", f"{len(candidates)} candidatos obtenidos para user_id: {user_id}, client_id: {client_id}")
+        print(f"[MATCHING DEBUG] ✅ Total de candidatos procesados: {len(candidates)}")
+        if candidates:
+            print(f"[MATCHING DEBUG] 📝 Primeros 3 candidatos: {[{'id': c.get('id'), 'name': c.get('name'), 'tech_stack': c.get('tech_stack')} for c in candidates[:3]]}")
         return json.dumps(candidates, indent=2)
         
     except Exception as e:
@@ -1095,11 +1114,15 @@ def get_candidates_data(limit: int | dict | None = 100) -> str:
 
         evaluation_logger.log_task_start("Obtener Candidatos", "Candidates Data Extractor")
         
+        print(f"[MATCHING DEBUG] 🔍 Buscando TODOS los candidatos - limit: {limit}")
+        
         url = os.getenv("SUPABASE_URL")
         key = os.getenv("SUPABASE_KEY")
         supabase = create_client(url, key)
         
+        print(f"[MATCHING DEBUG] 📊 Consultando tabla candidates con limit={limit}")
         response = supabase.table('candidates').select('*').limit(limit).execute()
+        print(f"[MATCHING DEBUG] ✅ Encontrados {len(response.data) if response.data else 0} candidatos en la base de datos")
         
         candidates = []
         for row in response.data:
@@ -1110,11 +1133,15 @@ def get_candidates_data(limit: int | dict | None = 100) -> str:
                 "phone": row.get('phone'),
                 "cv_url": row.get('cv_url'),
                 "tech_stack": row.get('tech_stack'),
+                "observations": row.get('observations'),
                 "created_at": row.get('created_at')
             }
             candidates.append(candidate)
         
         evaluation_logger.log_task_complete("Obtener Candidatos", f"{len(candidates)} candidatos obtenidos")
+        print(f"[MATCHING DEBUG] ✅ Total de candidatos procesados: {len(candidates)}")
+        if candidates:
+            print(f"[MATCHING DEBUG] 📝 Primeros 3 candidatos: {[{'id': c.get('id'), 'name': c.get('name'), 'tech_stack': c.get('tech_stack')} for c in candidates[:3]]}")
         return json.dumps(candidates, indent=2)
         
     except Exception as e:
@@ -1122,7 +1149,7 @@ def get_candidates_data(limit: int | dict | None = 100) -> str:
         return json.dumps({"error": f"Error obteniendo datos de candidates: {str(e)}"}, indent=2)
 
 @tool
-def create_candidate(name: str, email: str, phone: str, cv_url: str, tech_stack: str, linkedin: str = None, user_id: str = None, client_id: str = None) -> str:
+def create_candidate(name: str, email: str, phone: str, cv_url: str, tech_stack: str, linkedin: str = None, observations: str = None, user_id: str = None, client_id: str = None) -> str:
     """
     Crea (o actualiza por email) un candidato en la tabla 'candidates'.
     Si se proporcionan user_id y client_id, también crea un registro en candidate_recruiters.
@@ -1136,6 +1163,14 @@ def create_candidate(name: str, email: str, phone: str, cv_url: str, tech_stack:
             - JSON array string (e.g. "[\"Python\", \"AWS\"]")
             - Lista separada por comas (e.g. "Python, AWS")
         linkedin: URL del perfil de LinkedIn del candidato (opcional)
+        observations: Información adicional del candidato en formato JSON string. Debe tener la estructura:
+            {
+              "work_experience": [...],
+              "industries_and_sectors": [...],
+              "languages": [...],
+              "certifications_and_courses": [...],
+              "other": "..."
+            } (opcional)
         user_id: ID del usuario que crea el candidato (opcional)
         client_id: ID del cliente asociado (opcional)
 
@@ -1161,6 +1196,22 @@ def create_candidate(name: str, email: str, phone: str, cv_url: str, tech_stack:
             except json.JSONDecodeError:
                 parsed_stack = [t.strip() for t in tech_stack.split(',') if t.strip()]
 
+        # Normalizar observations a JSON válido (dict o None)
+        parsed_observations = None
+        if observations:
+            try:
+                # Intentar parsear como JSON string
+                if isinstance(observations, str):
+                    parsed_observations = json.loads(observations)
+                elif isinstance(observations, dict):
+                    parsed_observations = observations
+                else:
+                    evaluation_logger.log_error("Crear Candidato", f"Tipo de observations no válido: {type(observations)}")
+                    parsed_observations = None
+            except json.JSONDecodeError as e:
+                evaluation_logger.log_error("Crear Candidato", f"Error parseando JSON de observations: {str(e)}")
+                parsed_observations = None
+
         # Construir payload base
         payload = {
             "name": name or None,
@@ -1169,6 +1220,7 @@ def create_candidate(name: str, email: str, phone: str, cv_url: str, tech_stack:
             "linkedin": linkedin or None,
             "cv_url": cv_url or None,
             "tech_stack": parsed_stack if parsed_stack else None,
+            "observations": parsed_observations,
         }
 
         # Validar email básico (si viene)
@@ -1231,6 +1283,18 @@ def create_candidate(name: str, email: str, phone: str, cv_url: str, tech_stack:
                     print(f"⚠️ Error creando registro en candidate_recruiters: {str(recruiter_error)}")
 
         evaluation_logger.log_task_complete("Crear Candidato", "Registro creado/actualizado en candidates")
+        
+        # Indexar candidato en knowledge base (indexación incremental)
+        if candidate_id and response.data and len(response.data) > 0:
+            try:
+                from tools.vector_tools import index_candidate
+                candidate_data = response.data[0]
+                index_candidate(candidate_data)
+                evaluation_logger.log_task_progress("Crear Candidato", f"Candidato indexado en knowledge base: {candidate_id}")
+            except Exception as index_error:
+                # No fallar la creación si falla la indexación
+                evaluation_logger.log_error("Crear Candidato", f"Error indexando candidato: {str(index_error)}")
+        
         return json.dumps({
             "success": True,
             "action": "upsert" if email else "insert",

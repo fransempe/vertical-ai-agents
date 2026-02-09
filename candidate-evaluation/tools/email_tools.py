@@ -512,6 +512,16 @@ class GraphEmailMonitor:
                     "Insert JD Interview", 
                     f"Registro insertado exitosamente - ID: {inserted_record.get('id', 'N/A')}"
                 )
+                
+                # Indexar JD Interview en knowledge base (indexación incremental)
+                try:
+                    from tools.vector_tools import index_jd_interview
+                    index_jd_interview(inserted_record)
+                    evaluation_logger.log_task_progress("Insert JD Interview", f"JD Interview indexada en knowledge base: {inserted_record.get('id')}")
+                except Exception as index_error:
+                    # No fallar la creación si falla la indexación
+                    evaluation_logger.log_error("Insert JD Interview", f"Error indexando JD Interview: {str(index_error)}")
+                
                 return inserted_record
             else:
                 evaluation_logger.log_error("Insert JD Interview", "No se pudo insertar el registro")

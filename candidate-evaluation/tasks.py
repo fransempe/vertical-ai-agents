@@ -661,7 +661,7 @@ def create_matching_task(agent, user_id: str = None, client_id: str = None):
     
     # Determinar qué herramienta usar y la descripción
     if user_id and client_id:
-        candidates_instruction = f"- Usar get_candidates_by_recruiter(user_id='{user_id}', client_id='{client_id}') para obtener candidatos filtrados por user_id y client_id"
+        candidates_instruction = f"- Usar get_candidates_by_recruiter(user_id='{user_id}', client_id='{client_id}', limit=1000) para obtener candidatos filtrados por user_id y client_id"
     else:
         candidates_instruction = "- Usar get_candidates_data() para obtener todos los candidatos"
     
@@ -669,19 +669,30 @@ def create_matching_task(agent, user_id: str = None, client_id: str = None):
         description=f"""
         ⏱️ Antes de comenzar, imprime: START MATCHING [YYYY-MM-DD HH:MM:SS]. Al finalizar, imprime: END MATCHING [YYYY-MM-DD HH:MM:SS].
 
-        🎯 Realizar matching inteligente entre candidatos (tech_stack) y entrevistas (job_description).
+        🚨 **PROHIBICIÓN ABSOLUTA - CRÍTICO:**
+        - NUNCA inventes, modifiques o alteres NINGÚN dato que venga de la base de datos
+        - Usa EXACTAMENTE los datos que obtienes de las herramientas (get_candidates_data, get_candidates_by_recruiter, get_all_jd_interviews)
+        - Para jd_interviews: usa EXACTAMENTE el id, interview_name, agent_id, job_description, tech_stack, client_id, created_at que vienen de la herramienta
+        - Para candidates: usa EXACTAMENTE el id, name, email, phone, tech_stack, cv_url, observations que vienen de la herramienta
+        - NO generes agent_id, NO inventes IDs, NO modifiques nombres, NO alteres tech_stack
+        - Si un campo es null o vacío en la BD, déjalo como null o no lo incluyas, pero NO lo inventes
+        - Si no tienes un dato, NO lo inventes. Usa SOLO lo que está en la base de datos
+
+        🎯 Realizar matching inteligente entre candidatos (tech_stack) y entrevistas (tech_stack). Si la entrevista no tiene tech_stack, usar job_description como fallback.
         
         📊 **PROCESO DE MATCHING:**
         
         1. 📋 **Obtener Datos de Candidatos:**
            {candidates_instruction}
            - Extraer el campo tech_stack de cada candidato que es un array de strings
-           - Obtener información básica (id, name, email, phone, tech_stack, cv_url)
+           - Extraer el campo observations de cada candidato (JSONB con: work_experience, industries_and_sectors, languages, certifications_and_courses, other)
+           - Obtener información básica (id, name, email, phone, tech_stack, cv_url, observations)
         
         2. 📋 **Obtener Datos de Entrevistas:**
            {f"- Usar get_all_jd_interviews(client_id='{client_id}') para obtener entrevistas filtradas por client_id" if client_id else "- Usar get_all_jd_interviews() para obtener TODAS las entrevistas"}
-           - Extraer los campos interview_name y job_description
+           - Extraer los campos interview_name, job_description y tech_stack (string separado por comas, puede ser null o vacío)
            - Obtener información del agente asignado (agent_id)
+           - El tech_stack de la entrevista es el campo principal para la comparación técnica
         
         3. 🚫 **Verificar Meets Existentes (ANTES DEL MATCHING):**
            - Usar get_existing_meets_candidates() para obtener un diccionario donde cada clave es un jd_interview_id (string) y el valor es una lista de candidate_ids que ya tienen meets generados para esa entrevista
@@ -689,26 +700,81 @@ def create_matching_task(agent, user_id: str = None, client_id: str = None):
            - EXCLUIR completamente de los resultados cualquier combinación candidato-entrevista donde ya exista un meet
            - Ejemplo: Si el resultado es {{"jd_123": ["cand_1", "cand_2"]}}, entonces NO incluir cand_1 ni cand_2 en los matches para jd_123
         
-        4. 🔍 **Análisis de Compatibilidad:**
+        4. 🔍 **Análisis de Compatibilidad Técnica (tech_stack):**
            Para cada candidato vs cada entrevista (solo los que NO tienen meet existente):
-           - Comparar cada tecnología del tech_stack (array) con el job_description (texto)
-           - Buscar coincidencias case-insensitive y considerar variaciones (React=ReactJS, JavaScript=JS, Node.js=NodeJS)
-           - Si hay al menos UNA coincidencia, calcular score > 0
-           - Si NO hay coincidencias, score = 0 (no incluir en resultado)
+           - Obtener el tech_stack del candidato (array de strings)
+           - Obtener el tech_stack de la entrevista (string separado por comas, puede ser null o vacío)
+           - Si la entrevista NO tiene tech_stack o está vacío, usar el job_description como fallback para la comparación
+           - Si la entrevista tiene tech_stack:
+             * Parsear el tech_stack de la entrevista (separar por comas y limpiar espacios)
+             * Comparar cada tecnología del tech_stack del candidato (array) con cada tecnología del tech_stack de la entrevista (array)
+             * **SER INCLUSIVO**: Buscar coincidencias case-insensitive y considerar variaciones amplias:
+               - React = ReactJS = React.js = React Native
+               - JavaScript = JS = ECMAScript = ES6
+               - Node.js = NodeJS = Node
+               - Python = Python3 = Python 3
+               - TypeScript = TS
+               - Vue = Vue.js = VueJS
+               - Angular = AngularJS = Angular.js
+               - SQL = MySQL = PostgreSQL = SQL Server = Oracle
+               - AWS = Amazon Web Services
+               - Docker = Docker Compose
+               - Kubernetes = K8s
+               - Git = GitHub = GitLab = Bitbucket
+               - Y cualquier otra variación razonable
+             * **NO SER ESTRICTO**: Si hay CUALQUIER coincidencia (exacta, parcial o relacionada), calcular score > 0
+             * Calcular el score basado en el número de coincidencias exactas y relacionadas
+           - **CRÍTICO - SER INCLUSIVO**: Si hay al menos UNA coincidencia (incluso parcial o relacionada), calcular score > 0 e INCLUIR en resultados
+           - **NO OMITIR**: No omitir candidatos válidos. Si hay alguna relación técnica, incluir el match aunque sea débil
+           - Solo excluir si NO hay NINGUNA coincidencia técnica (ni exacta, ni parcial, ni relacionada)
         
-        5. 📊 **Criterios de Evaluación:**
-           - Coincidencias exactas: 40% (tech_stack aparece en job_description)
-           - Coincidencias relacionadas: 30% (frameworks/herramientas relacionadas)
-           - Tecnologías complementarias: 20% (skills del JD que complementan)
-           - Gaps críticos: -10% (tecnologías esenciales del JD que faltan)
-           - Score mínimo: 10% si hay al menos una coincidencia
+        4.5. 📋 **Análisis de Compatibilidad basado en Observations:**
+           Para cada candidato que tenga observations y cada entrevista:
+           - Analizar work_experience: Comparar empresas, posiciones y responsabilidades con requisitos del JD
+           - Analizar industries_and_sectors: Evaluar si los rubros/industrias del candidato son relevantes para el tipo de empresa/cliente del JD
+           - Analizar languages: Verificar si los idiomas del candidato cumplen con los requisitos de idioma del JD (si están especificados)
+           - Analizar certifications_and_courses: Evaluar si las certificaciones y cursos son relevantes para el puesto
+           - Analizar other: Buscar información adicional relevante (proyectos, publicaciones, etc.) que pueda ser relevante
+           - Calcular un score de observations (0-100) basado en:
+             * Relevancia de experiencia laboral: 30%
+             * Coincidencia de rubros/industrias: 25%
+             * Cumplimiento de requisitos de idiomas: 20%
+             * Relevancia de certificaciones: 15%
+             * Información adicional relevante: 10%
+           - Generar un análisis textual breve (1-2 líneas) sobre la compatibilidad de observations con el JD
+        
+        5. 📊 **Criterios de Evaluación (combinando tech_stack y observations):**
+           **Para tech_stack (SER INCLUSIVO Y GENEROSO):**
+           - Coincidencias exactas: 40% (tecnologías que coinciden exactamente entre el tech_stack del candidato y el tech_stack de la entrevista)
+           - Coincidencias relacionadas: 30% (frameworks/herramientas relacionadas o variaciones, ej: React=ReactJS, JavaScript=JS)
+           - Tecnologías complementarias: 20% (tecnologías del JD que complementan las del candidato)
+           - Gaps críticos: -10% (tecnologías esenciales del tech_stack del JD que faltan en el candidato)
+           - **Score base INCLUSIVO**: Calcular como (coincidencias_exactas + coincidencias_relacionadas) / total_tech_jd * 100
+           - **Score mínimo GENEROSO**: 15% si hay al menos una coincidencia (exacta o relacionada)
+           - **BONIFICACIÓN**: Si hay múltiples coincidencias, sumar bonificaciones (no solo dividir)
+           - **NO SER ESTRICTO**: Incluir candidatos incluso con coincidencias parciales o relacionadas
+           - Si el JD no tiene tech_stack, usar job_description como fallback para la comparación
+           - **IMPORTANTE**: Si un candidato tiene tecnologías relacionadas o complementarias, darle un score razonable (mínimo 15-20%)
+           
+           **Para observations (si está disponible):**
+           - Relevancia de experiencia laboral: 30% (empresas, posiciones, responsabilidades relevantes)
+           - Coincidencia de rubros/industrias: 25% (rubros del candidato vs tipo de empresa/cliente del JD)
+           - Cumplimiento de requisitos de idiomas: 20% (idiomas del candidato vs requisitos del JD)
+           - Relevancia de certificaciones: 15% (certificaciones relevantes para el puesto)
+           - Información adicional relevante: 10% (proyectos, publicaciones, etc. relevantes)
+           
+           **Score final combinado:**
+           - Si el candidato tiene observations: Score final = (tech_stack_score * 0.6) + (observations_score * 0.4)
+           - Si el candidato NO tiene observations: Score final = tech_stack_score
         
         6. 🎯 **Generar Resultados SIMPLIFICADOS:**
            - SOLO mostrar candidatos que tengan matches (score > 0) ordenados por score de mayor a menor
            - Para cada candidato con matches, incluir:
-             * Datos completos del candidato (id, name, email, phone, cv_url, tech_stack)
+             * Datos completos del candidato (id, name, email, phone, cv_url, tech_stack, observations si está disponible)
+               **CRÍTICO**: Usa EXACTAMENTE los datos del candidato que obtuviste de la herramienta, NO los inventes
              * Lista de entrevistas que coinciden con sus datos ordenadas por score de compatibilidad de mayor a menor
-             * Para cada entrevista: registro completo de jd_interviews (id, interview_name, agent_id, job_description, client_id, created_at) + score de compatibilidad + análisis del match
+             * Para cada entrevista: registro completo de jd_interviews (id, interview_name, agent_id, job_description, tech_stack, client_id, created_at) + score de compatibilidad + análisis del match técnico + análisis del match de observations (si observations está disponible)
+               **CRÍTICO**: Usa EXACTAMENTE los datos de jd_interviews que obtuviste de get_all_jd_interviews. NO inventes agent_id, NO modifiques id, NO alteres ningún campo. Copia EXACTAMENTE lo que viene de la base de datos.
         
         7. 📝 **Formato de Salida SIMPLIFICADO:**
            ```json
@@ -721,7 +787,14 @@ def create_matching_task(agent, user_id: str = None, client_id: str = None):
                    "email": "juan@email.com",
                    "phone": "+1234567890",
                    "cv_url": "https://s3.../cv.pdf",
-                   "tech_stack": ["React", "JavaScript", "Node.js"]
+                   "tech_stack": ["React", "JavaScript", "Node.js"],
+                   "observations": {{
+                     "work_experience": [...],
+                     "industries_and_sectors": [...],
+                     "languages": [...],
+                     "certifications_and_courses": [...],
+                     "other": "..."
+                   }}
                  }},
                  "matching_interviews": [
                    {{
@@ -730,28 +803,48 @@ def create_matching_task(agent, user_id: str = None, client_id: str = None):
                        "interview_name": "Desarrollador React Senior",
                        "agent_id": "agent_123",
                        "job_description": "Buscamos desarrollador con React, JavaScript...",
+                       "tech_stack": "React, JavaScript, Node.js",
                        "client_id": "client_456",
                        "created_at": "2025-01-18T10:30:00Z"
                      }},
                      "compatibility_score": 85,
-                     "match_analysis": "Excelente match con React y JavaScript..."
+                     "match_analysis": "Excelente match con React y JavaScript...",
+                     "observations_match": {{
+                       "work_experience_relevance": "Análisis de relevancia de experiencia laboral con el JD",
+                       "industries_match": "Análisis de coincidencia de rubros/industrias",
+                       "languages_match": "Análisis de cumplimiento de requisitos de idiomas",
+                       "certifications_match": "Análisis de relevancia de certificaciones",
+                       "overall_observations_score": 75,
+                       "observations_analysis": "Análisis general de compatibilidad de observations con el JD"
+                     }}
                    }}
                  ]
                }}
              ]
            }}
            ```
+           
+           **IMPORTANTE sobre observations_match:**
+           - Si el candidato NO tiene observations o está vacío, el campo observations_match debe ser null o no incluirse
+           - Si el candidato tiene observations, SIEMPRE incluir observations_match con todos sus campos
+           - El overall_observations_score debe ser un número entre 0 y 100
+           - Los análisis textuales deben ser breves (1-2 líneas cada uno)
         
         ⚠️ **IMPORTANTE:** 
-        - Solo incluir candidatos que tengan al menos un match (score > 0)
+        - **SER INCLUSIVO**: Incluir candidatos que tengan al menos un match (score > 0), incluso si el match es débil o parcial
+        - **NO OMITIR CANDIDATOS VÁLIDOS**: Si un candidato tiene alguna coincidencia técnica (exacta, parcial o relacionada), incluirlo en los resultados
+        - **GENEROSIDAD EN MATCHING**: Es mejor incluir más candidatos que omitir candidatos válidos. Si hay duda, incluir el match con un score apropiado
         - Todo el análisis debe estar en ESPAÑOL LATINO
         - Utiliza terminología de recursos humanos en español de América Latina
         - Si no hay matches, retornar: {{"matches": []}}
-        - **CRÍTICO**: La respuesta debe ser SOLO JSON válido, sin texto adicional
-        - **CRÍTICO**: No incluir explicaciones fuera del JSON
+        - **CRÍTICO**: La respuesta debe ser SOLO JSON válido, sin texto adicional antes o después
+        - **CRÍTICO**: No incluir explicaciones, comentarios, ni texto fuera del JSON
+        - **CRÍTICO**: No usar bloques de código markdown (```json ... ```), solo el JSON puro
         - **CRÍTICO**: El JSON debe empezar con {{ y terminar con }}
+        - **CRÍTICO**: No agregar ningún texto antes del {{ ni después del }}
+        - **CRÍTICO**: La respuesta completa debe ser parseable directamente con json.loads()
         """,
-        expected_output="SOLO JSON válido con estructura: {'matches': [{'candidate': {...}, 'matching_interviews': [{'jd_interviews': {...}, 'compatibility_score': X, 'match_analysis': '...'}]}]}",
+        expected_output="SOLO JSON válido con estructura: {'matches': [{'candidate': {...}, 'matching_interviews': [{'jd_interviews': {...}, 'compatibility_score': X, 'match_analysis': '...', 'observations_match': {...} (si observations está disponible)}]}]}",
         agent=agent
     )
 
@@ -811,12 +904,34 @@ def create_elevenlabs_prompt_generation_task(agent, interview_name: str, job_des
            - Proporcione contexto sobre el puesto y sus responsabilidades
            - Establezca el tono profesional pero amigable
            - Sea específico para esta búsqueda, no genérico
+           - Incluya de forma EXPLÍCITA la estructura de preguntas que debe seguir el agente de voz:
+             
+             1. **1 PREGUNTA DE RESPONSABILIDADES EN EXPERIENCIA LABORAL:**
+                - El primer paso SIEMPRE debe ser hacer 1 (UNA) pregunta sobre la experiencia laboral del candidato.
+                - Antes de preguntar, el agente debe leer del JSON devuelto por la herramienta `get-candidate-info` las propiedades `"responsibilities"` y `"experiencia"` (o estructuras equivalentes dentro de `experience`).
+                - Debe tomar algunas de las responsabilidades que tuvo el candidato en trabajos previos para formular una pregunta concreta sobre UNA de esas responsabilidades.
+                - Si esta información NO está disponible en el JSON (no hay `responsibilities` ni `experiencia` ni datos equivalentes), el agente debe **seguir adelante igualmente**, haciendo una pregunta general sobre responsabilidades en su experiencia laboral SIN fallar ni detener la entrevista.
+             
+             2. **1 PREGUNTA DE HABILIDADES BLANDAS:**
+                - Realizar 1 (UNA) pregunta sobre habilidades blandas del candidato (comunicación, trabajo en equipo, liderazgo, resolución de problemas, adaptabilidad, etc.).
+             
+             3. **3 PREGUNTAS TÉCNICAS DEL PUESTO:**
+                - Realizar 3 (TRES) preguntas técnicas específicas basadas en la descripción del puesto y el stack tecnológico requerido.
+                - Las preguntas deben estar directamente relacionadas con las tecnologías, herramientas y conocimientos técnicos mencionados en la JD.
+             
+             4. **REGLAS IMPORTANTES:**
+                - NO hagas más de 1 pregunta sobre la experiencia del candidato.
+                - NO hagas más de 1 pregunta de habilidades blandas.
+                - NO hagas más de 3 preguntas técnicas.
+                - En total deben ser exactamente 5 preguntas (1 experiencia, 1 soft skill, 3 técnicas).
+                - Al finalizar las 5 preguntas, el agente debe agradecer al candidato y cerrar la entrevista de forma cordial.
+                - Siempre que alguna información proviniente de `get-candidate-info` no esté disponible en el JSON (por ejemplo `responsibilities` o `experiencia`), el agente debe **continuar normalmente** sin bloquearse, haciendo preguntas más generales sin depender de esos campos.
         
         3. El prompt debe:
            - Estar en español
            - Ser conciso pero completo
-           - NO incluir instrucciones sobre cantidad de preguntas (eso se agregará después)
-           - Enfocarse en definir el rol y contexto del entrevistador
+           - Incluir las reglas anteriores sobre la cantidad y tipo de preguntas
+           - Enfocarse en definir el rol, el contexto del entrevistador y la estructura de la entrevista (5 preguntas en total)
         
         **INSTRUCCIONES PARA EXTRACCIÓN DE DATOS DEL CLIENTE:**
         Extrae los siguientes datos del cliente desde la descripción del puesto (busca en el formato "Cliente: X - Responsable: Y - Teléfono: Z"):

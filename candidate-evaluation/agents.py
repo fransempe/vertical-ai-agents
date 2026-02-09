@@ -7,16 +7,24 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Configurar el modelo de OpenAI
+# Configurar el modelo de OpenAI para procesos generales (CV analysis, evaluación)
 llm = ChatOpenAI(
-    model="gpt-4o-mini", #"gpt-4o-mini",
-    #model="gpt-5-nano",
+    model="gpt-4o-mini",
     api_key=os.getenv("OPENAI_API_KEY"),
+    temperature=0,  # Temperatura 0 para consistencia
 )
 
 FINAL = ChatOpenAI(
     model="gpt-5-nano",
     api_key=os.getenv("OPENAI_API_KEY"),
+)
+
+# LLM específico para matching con temperatura baja para mayor consistencia
+# Usamos gpt-4o (modelo más grande) para evitar que invente datos y mejorar calidad de matches
+MATCHING_LLM = ChatOpenAI(
+    model="gpt-4o",  # Modelo más potente para precisión crítica en matching
+    api_key=os.getenv("OPENAI_API_KEY"),
+    temperature=0,  # Temperatura 0 para resultados más determinísticos y consistentes
 )
 
 common_agent_kwargs = dict(verbose=False, max_iter=1, allow_delegation=False, memory=False)
@@ -269,16 +277,27 @@ def create_candidate_matching_agent(user_id: str = None, client_id: str = None):
         
         **SCORING:** Coincidencias exactas (40%), relacionadas (30%), complementarias (20%), gaps críticos (-10%)
         
+        **ENFOQUE INCLUSIVO:**
+        - SER GENEROSO en el matching: incluir candidatos con coincidencias parciales o relacionadas
+        - NO OMITIR candidatos válidos: si hay alguna relación técnica, incluir el match
+        - Considerar variaciones amplias de tecnologías (React=ReactJS, JavaScript=JS, etc.)
+        - Es mejor incluir más candidatos que omitir candidatos válidos
+        
         IMPORTANTE: Todo el análisis debe estar en ESPAÑOL LATINO.
         Utiliza terminología de recursos humanos en español de América Latina.
 
-        **PROHIBICIÓN ABSOLUTA:** NUNCA inventes datos de candidatos, entrevistas, conversaciones o clientes.
-        Trabaja únicamente con la información real de la base de datos para generar los reportes de matching.
+        **PROHIBICIÓN ABSOLUTA - CRÍTICO:** 
+        - NUNCA inventes, modifiques o alteres NINGÚN dato de la base de datos
+        - Para jd_interviews: usa EXACTAMENTE el id, interview_name, agent_id, job_description, tech_stack, client_id, created_at que vienen de get_all_jd_interviews
+        - Para candidates: usa EXACTAMENTE el id, name, email, phone, tech_stack, cv_url, observations que vienen de las herramientas
+        - NO generes agent_id, NO inventes IDs, NO modifiques nombres, NO alteres tech_stack
+        - Si un campo es null en la BD, déjalo como null, pero NO lo inventes
+        - Trabaja únicamente con la información EXACTA de la base de datos, sin modificaciones ni invenciones
         
         **TL;DR:** Análisis conciso. Solo scores y matches esenciales. Sin texto innecesario.""",
         tools=[candidates_tool, get_all_jd_interviews, get_existing_meets_candidates],
         **common_agent_kwargs,
-        llm=llm,
+        llm=MATCHING_LLM,  # Usar LLM específico para matching con temperature=0
     )
 
 def create_elevenlabs_prompt_generator_agent():
