@@ -904,12 +904,34 @@ def create_elevenlabs_prompt_generation_task(agent, interview_name: str, job_des
            - Proporcione contexto sobre el puesto y sus responsabilidades
            - Establezca el tono profesional pero amigable
            - Sea específico para esta búsqueda, no genérico
+           - Incluya de forma EXPLÍCITA la estructura de preguntas que debe seguir el agente de voz:
+             
+             1. **1 PREGUNTA DE RESPONSABILIDADES EN EXPERIENCIA LABORAL:**
+                - El primer paso SIEMPRE debe ser hacer 1 (UNA) pregunta sobre la experiencia laboral del candidato.
+                - Antes de preguntar, el agente debe leer del JSON devuelto por la herramienta `get-candidate-info` las propiedades `"responsibilities"` y `"experiencia"` (o estructuras equivalentes dentro de `experience`).
+                - Debe tomar algunas de las responsabilidades que tuvo el candidato en trabajos previos para formular una pregunta concreta sobre UNA de esas responsabilidades.
+                - Si esta información NO está disponible en el JSON (no hay `responsibilities` ni `experiencia` ni datos equivalentes), el agente debe **seguir adelante igualmente**, haciendo una pregunta general sobre responsabilidades en su experiencia laboral SIN fallar ni detener la entrevista.
+             
+             2. **1 PREGUNTA DE HABILIDADES BLANDAS:**
+                - Realizar 1 (UNA) pregunta sobre habilidades blandas del candidato (comunicación, trabajo en equipo, liderazgo, resolución de problemas, adaptabilidad, etc.).
+             
+             3. **3 PREGUNTAS TÉCNICAS DEL PUESTO:**
+                - Realizar 3 (TRES) preguntas técnicas específicas basadas en la descripción del puesto y el stack tecnológico requerido.
+                - Las preguntas deben estar directamente relacionadas con las tecnologías, herramientas y conocimientos técnicos mencionados en la JD.
+             
+             4. **REGLAS IMPORTANTES:**
+                - NO hagas más de 1 pregunta sobre la experiencia del candidato.
+                - NO hagas más de 1 pregunta de habilidades blandas.
+                - NO hagas más de 3 preguntas técnicas.
+                - En total deben ser exactamente 5 preguntas (1 experiencia, 1 soft skill, 3 técnicas).
+                - Al finalizar las 5 preguntas, el agente debe agradecer al candidato y cerrar la entrevista de forma cordial.
+                - Siempre que alguna información proviniente de `get-candidate-info` no esté disponible en el JSON (por ejemplo `responsibilities` o `experiencia`), el agente debe **continuar normalmente** sin bloquearse, haciendo preguntas más generales sin depender de esos campos.
         
         3. El prompt debe:
            - Estar en español
            - Ser conciso pero completo
-           - NO incluir instrucciones sobre cantidad de preguntas (eso se agregará después)
-           - Enfocarse en definir el rol y contexto del entrevistador
+           - Incluir las reglas anteriores sobre la cantidad y tipo de preguntas
+           - Enfocarse en definir el rol, el contexto del entrevistador y la estructura de la entrevista (5 preguntas en total)
         
         **INSTRUCCIONES PARA EXTRACCIÓN DE DATOS DEL CLIENTE:**
         Extrae los siguientes datos del cliente desde la descripción del puesto (busca en el formato "Cliente: X - Responsable: Y - Teléfono: Z"):
