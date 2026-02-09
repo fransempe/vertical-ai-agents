@@ -2217,6 +2217,31 @@ INSTRUCCIONES:
         evaluation_logger.log_error("Chatbot", f"Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=error_msg)
 
+@app.get("/get-candidate-info/{candidate_id}", response_model=CandidateInfoResponse)
+async def get_candidate_info_by_id(
+    candidate_id: str,
+    include_related: bool = True
+):
+    """
+    Endpoint para obtener información de candidatos por ID (path parameter).
+    Diseñado para ser usado como herramienta por ElevenLabs Agents.
+    
+    Args:
+        candidate_id: ID único del candidato (UUID) - path parameter
+        include_related: Si True, incluye información de meets y evaluaciones relacionadas
+        
+    Returns:
+        Información del candidato con datos completos
+    """
+    return await get_candidate_info(
+        candidate_id=candidate_id,
+        meet_id=None,
+        token=None,
+        email=None,
+        name=None,
+        include_related=include_related
+    )
+
 @app.get("/get-candidate-info", response_model=CandidateInfoResponse)
 async def get_candidate_info(
     candidate_id: Optional[str] = None,
