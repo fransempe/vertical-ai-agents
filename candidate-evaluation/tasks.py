@@ -874,6 +874,70 @@ def create_single_meet_extraction_task(agent, meet_id: str):
         agent=agent
     )
 
+def create_single_meeting_minutes_task(agent, extraction_task, evaluation_task):
+    """Tarea para generar y guardar una minuta breve de un meet específico"""
+    return Task(
+        description="""
+        ⏱️ Antes de comenzar, imprime: START SINGLE_MEET_MINUTE [YYYY-MM-DD HH:MM:SS]. 
+        Al finalizar, imprime: END SINGLE_MEET_MINUTE [YYYY-MM-DD HH:MM:SS].
+
+        Tu objetivo es redactar UNA MINUTA BREVE de la entrevista (meet) y guardarla
+        en la tabla meeting_minutes_knowledge usando la herramienta save_meeting_minute.
+
+        📥 Datos disponibles en el contexto (NO inventar nada fuera de esto):
+        - De extraction_task: meet (id, jd_interviews_id), conversation (conversation_data, candidate, emotion_analysis opcional),
+          jd_interview (interview_name, job_description, client_id), client (nombre, email, etc.).
+        - De evaluation_task: análisis ya procesado de la entrevista (match_evaluation, conversation_analysis, etc.).
+
+        📝 PASOS:
+        1. Identificar correctamente:
+           - meet_id (ID del meet evaluado)
+           - candidate_id (ID del candidato)
+           - jd_interview_id (si está disponible en los datos)
+
+        2. Redactar una MINUTA NO EXTENSA (8-15 líneas máximo) en español latino que incluya:
+           - Contexto de la búsqueda (rol, stack principal o tipo de posición).
+           - Breve perfil del candidato (experiencia relevante y foco principal).
+           - Puntos fuertes más relevantes que surgieron en la conversación.
+           - Riesgos, alertas o dudas importantes (si las hubo).
+           - Próximos pasos sugeridos (por ejemplo: seguir a entrevista técnica, entrevista con cliente, descartar, etc.).
+
+           ⚠️ NO repitas todo el análisis extenso. Esto debe poder leerse rápido por un recruiter humano.
+           ⚠️ NO inventes empresas, proyectos ni tecnologías que no aparezcan en la conversación o en la JD.
+
+        3. Construir también un RESUMEN ULTRA BREVE (2-3 líneas) que capture la esencia de la entrevista
+           (por ejemplo: nivel general, fit con el rol y recomendación final).
+
+        4. Definir un título corto (title) para la minuta, por ejemplo:
+           - "Minuta entrevista {interview_name} - {nombre_candidato}"
+           - o "Minuta meet {meet_id} - {nombre_candidato}"
+
+        5. Definir una lista corta de tags (3-6 máximo) en formato de lista Python, por ejemplo:
+           - ['frontend', 'senior', 'react', 'buena_comunicacion']
+           Los tags deben derivarse del rol, stack y rasgos clave del candidato, SIN inventar tecnologías ajenas.
+
+        6. LLAMAR EXACTAMENTE UNA VEZ a la herramienta save_meeting_minute con:
+           - meet_id: el ID real del meet
+           - candidate_id: el ID real del candidato
+           - jd_interview_id: si está disponible, úsalo; si no, pásalo como null o None
+           - title: el título corto que definiste
+           - raw_minutes: el texto completo de la minuta (8-15 líneas, no más)
+           - summary: el resumen ultra breve de 2-3 líneas
+           - tags: la lista de tags que preparaste
+
+           ⚠️ REGLA CRÍTICA: NO llames a save_meeting_minute más de una vez.
+           ⚠️ Si por algún motivo faltan meet_id o candidate_id en los datos, 
+              explica claramente el motivo y NO llames a la herramienta.
+
+        🎯 SALIDA ESPERADA:
+        - Confirmación de que se llamó a save_meeting_minute correctamente
+        - El ID de la minuta creada (minute_id) si la herramienta lo devuelve
+        """,
+        expected_output="Confirmación de guardado de minuta con minute_id, o explicación clara de por qué no se pudo guardar.",
+        agent=agent,
+        context=[extraction_task, evaluation_task],
+    )
+
 def create_elevenlabs_prompt_generation_task(agent, interview_name: str, job_description: str, sender_email: str):
     """Tarea para generar el prompt específico de ElevenLabs basado en la JD y extraer datos del cliente"""
     return Task(

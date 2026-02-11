@@ -1008,6 +1008,210 @@ def save_meet_evaluation(full_result: str) -> str:
 
 
 @tool
+def save_meeting_minute(
+    meet_id: str,
+    candidate_id: str,
+    jd_interview_id: str | None = None,
+    title: str | None = None,
+    raw_minutes: str | None = None,
+    summary: str | None = None,
+    tags: str | list | None = None,
+) -> str:
+    """
+    Guarda una minuta breve de una entrevista en la tabla meeting_minutes_knowledge.
+
+    Args:
+        meet_id: ID del meet asociado a la entrevista.
+        candidate_id: ID del candidato evaluado.
+        jd_interview_id: ID de la búsqueda (jd_interviews.id) asociada (opcional pero recomendado).
+        title: Título corto de la minuta (opcional).
+        raw_minutes: Texto completo de la minuta (obligatorio, pero NO debe ser excesivamente largo).
+        summary: Resumen aún más breve (2-3 líneas) de la entrevista (opcional).
+        tags: Lista de tags o string JSON/CSV con tags (opcional), por ejemplo:
+              '["frontend", "senior", "react"]' o "frontend, senior, react".
+
+    Returns:
+        JSON string con el resultado de la operación (success, minute_id o error).
+    """
+    try:
+        evaluation_logger.log_task_start(
+            "Guardar Minuta de Meet",
+            f"Preparando minuta para meet_id={meet_id}, candidate_id={candidate_id}",
+        )
+
+        url = os.getenv("SUPABASE_URL")
+        key = os.getenv("SUPABASE_KEY")
+
+        if not url or not key:
+            error_msg = "SUPABASE_URL o SUPABASE_KEY no configurados"
+            evaluation_logger.log_error("Guardar Minuta de Meet", error_msg)
+            return json.dumps({"success": False, "error": error_msg}, indent=2, ensure_ascii=False)
+
+        if not meet_id or not candidate_id:
+            error_msg = "meet_id y candidate_id son obligatorios"
+            evaluation_logger.log_error("Guardar Minuta de Meet", error_msg)
+            return json.dumps({"success": False, "error": error_msg}, indent=2, ensure_ascii=False)
+
+        if not raw_minutes or not str(raw_minutes).strip():
+            error_msg = "raw_minutes es obligatorio y no puede estar vacío"
+            evaluation_logger.log_error("Guardar Minuta de Meet", error_msg)
+            return json.dumps({"success": False, "error": error_msg}, indent=2, ensure_ascii=False)
+
+        supabase = create_client(url, key)
+
+        # Normalizar tags a lista de strings
+        parsed_tags: list[str] | None = None
+        if tags:
+            if isinstance(tags, list):
+                parsed_tags = [str(t).strip() for t in tags if str(t).strip()]
+            elif isinstance(tags, str):
+                # Intentar parsear como JSON primero
+                try:
+                    maybe = json.loads(tags)
+                    if isinstance(maybe, list):
+                        parsed_tags = [str(t).strip() for t in maybe if str(t).strip()]
+                    else:
+                        parsed_tags = [str(maybe).strip()]
+                except json.JSONDecodeError:
+                    # Fallback: separar por comas
+                    parsed_tags = [t.strip() for t in tags.split(",") if t.strip()]
+
+        # Generar embedding a partir de la minuta completa
+        try:
+            from tools.vector_tools import generate_embedding, update_knowledge_chunk
+
+            text_for_embedding = str(raw_minutes)
+            embedding = generate_embedding(text_for_embedding)
+        except Exception as emb_error:
+            evaluation_logger.log_error(
+                "Guardar Minuta de Meet",
+                f"Error generando embedding para la minuta: {str(emb_error)}",
+            )
+            return json.dumps(
+                {
+                    "success": False,
+                    "error": f"Error generando embedding para la minuta: {str(emb_error)}",
+                },
+                indent=2,
+                ensure_ascii=False,
+            )
+
+        now = datetime.now().isoformat()
+
+        minute_data: dict[str, Any] = {
+            "meet_id": meet_id,
+            "candidate_id": candidate_id,
+            "jd_interview_id": jd_interview_id,
+            "title": title,
+            "raw_minutes": raw_minutes,
+            "summary": summary,
+            "source_agent": "meeting_minutes_agent_v1",
+            "source_system": "candidate_evaluation",
+            "tags": parsed_tags,
+            "embedding": embedding,
+            "created_at": now,
+            "updated_at": now,
+        }
+
+        evaluation_logger.log_task_progress(
+            "Guardar Minuta de Meet",
+            f"Insertando minuta en meeting_minutes_knowledge para meet_id={meet_id}",
+        )
+
+        response = supabase.table("meeting_minutes_knowledge").insert(minute_data).execute()
+
+        if response.data and len(response.data) > 0:
+            minute_row = response.data[0]
+            minute_id = minute_row.get("id")
+
+            # Indexar también en knowledge_chunks para reutilizar la búsqueda vectorial genérica
+            try:
+                content_parts = []
+                if title:
+                    content_parts.append(f"Título: {title}")
+                if summary:
+                    content_parts.append(f"Resumen: {summary}")
+                # Agregar un preview acotado de la minuta completa
+                if raw_minutes:
+                    preview = str(raw_minutes)
+                    if len(preview) > 1000:
+                        preview = preview[:1000] + "... [truncado]"
+                    content_parts.append(f"Minuta: {preview}")
+
+                kc_content = "\n".join(content_parts) if content_parts else str(raw_minutes)[:1000]
+
+                metadata: dict[str, Any] = {
+                    "meeting_minute_id": minute_id,
+                    "meet_id": meet_id,
+                    "candidate_id": candidate_id,
+                    "jd_interview_id": jd_interview_id,
+                    "tags": parsed_tags,
+                    "source": "meeting_minutes_knowledge",
+                    "source_agent": minute_data.get("source_agent"),
+                    "title": title,
+                    "summary": summary,
+                }
+
+                update_knowledge_chunk(
+                    entity_id=str(minute_id),
+                    entity_type="meeting_minute",
+                    content=kc_content,
+                    embedding=embedding,
+                    metadata=metadata,
+                )
+                evaluation_logger.log_task_progress(
+                    "Guardar Minuta de Meet",
+                    f"Minuta indexada en knowledge_chunks: {minute_id}",
+                )
+            except Exception as index_err:
+                evaluation_logger.log_error(
+                    "Guardar Minuta de Meet",
+                    f"Error indexando minuta en knowledge_chunks: {str(index_err)}",
+                )
+
+            evaluation_logger.log_task_complete(
+                "Guardar Minuta de Meet",
+                f"Minuta guardada exitosamente: {minute_id}",
+            )
+            return json.dumps(
+                {
+                    "success": True,
+                    "minute_id": minute_id,
+                    "message": "Minuta guardada exitosamente",
+                },
+                indent=2,
+                ensure_ascii=False,
+            )
+
+        evaluation_logger.log_error(
+            "Guardar Minuta de Meet",
+            "Insert ejecutado pero la respuesta vino vacía",
+        )
+        return json.dumps(
+            {
+                "success": False,
+                "error": "Insert ejecutado pero la respuesta vino vacía",
+            },
+            indent=2,
+            ensure_ascii=False,
+        )
+
+    except Exception as e:
+        evaluation_logger.log_error(
+            "Guardar Minuta de Meet",
+            f"Error guardando minuta: {str(e)}",
+        )
+        return json.dumps(
+            {
+                "success": False,
+                "error": f"Error guardando minuta: {str(e)}",
+            },
+            indent=2,
+            ensure_ascii=False,
+        )
+
+
+@tool
 def get_candidates_by_recruiter(user_id: str, client_id: str, limit: Optional[int] = None) -> str:
     """
     Obtiene candidatos filtrados por user_id y client_id desde la tabla candidate_recruiters.

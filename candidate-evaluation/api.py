@@ -17,7 +17,7 @@ from datetime import datetime
 from pathlib import Path
 from contextlib import asynccontextmanager
 from typing import Dict, Optional, List, Any
-from fastapi import FastAPI, HTTPException, Request, BackgroundTasks, Response
+from fastapi import FastAPI, HTTPException, Request, BackgroundTasks, Response, Query
 import httpx
 from pydantic import BaseModel
 from crew import create_data_processing_crew
@@ -224,6 +224,28 @@ class AnalysisResponse(BaseModel):
     result: dict | None = None
     jd_interview_id: str | None = None
     evaluation_id: str | None = None
+
+class MeetingMinutesContextRequest(BaseModel):
+    jd_interview_id: str | None = None
+    candidate_id: str | None = None
+    meet_id: str | None = None
+    query: str
+    top_k: int = 5
+    match_threshold: float = 0.5
+
+class MeetingMinuteMatch(BaseModel):
+    minute_id: str
+    score: float
+    title: str | None = None
+    summary: str | None = None
+    raw_minutes_preview: str | None = None
+    tags: List[str] | None = None
+    meet_id: str | None = None
+    candidate_id: str | None = None
+    jd_interview_id: str | None = None
+
+class MeetingMinutesContextResponse(BaseModel):
+    matches: List[MeetingMinuteMatch]
 
 class CVRequest(BaseModel):
     filename: str
@@ -985,6 +1007,101 @@ def _build_emotion_sentiment_summary(emotion_analysis: dict | None) -> dict | No
         "prosody_summary_text": prosody_text,
         "burst_summary_text": burst_text,
     }
+
+
+@app.post("/meeting-minutes-context", response_model=MeetingMinutesContextResponse)
+async def meeting_minutes_context(request: MeetingMinutesContextRequest):
+    """
+    Endpoint para que un agente externo (por ejemplo ElevenLabs) obtenga contexto
+    basado en minutas de entrevistas anteriores, usando búsqueda vectorial.
+
+    - Usa la tabla lógica `knowledge_chunks` con entity_type = "meeting_minute"
+      (las minutas se indexan allí automáticamente al guardarse).
+    - Opcionalmente filtra por jd_interview_id, candidate_id o meet_id.
+    """
+    try:
+        query_text = request.query.strip()
+        if not query_text:
+            raise HTTPException(status_code=400, detail="query no puede estar vacío")
+
+        # Buscar chunks similares de tipo "meeting_minute"
+        chunks = search_similar_chunks(
+            query_text=query_text,
+            match_threshold=request.match_threshold,
+            match_count=request.top_k,
+            entity_type_filter="meeting_minute",
+        )
+
+        matches: List[MeetingMinuteMatch] = []
+
+        for ch in chunks or []:
+            metadata = ch.get("metadata") or {}
+
+            # Filtros opcionales por IDs específicos
+            if request.jd_interview_id and metadata.get("jd_interview_id") != request.jd_interview_id:
+                continue
+            if request.candidate_id and metadata.get("candidate_id") != request.candidate_id:
+                continue
+            if request.meet_id and metadata.get("meet_id") != request.meet_id:
+                continue
+
+            minute_id = metadata.get("meeting_minute_id") or metadata.get("minute_id") or ch.get("entity_id")
+            if not minute_id:
+                continue
+
+            match = MeetingMinuteMatch(
+                minute_id=str(minute_id),
+                score=float(ch.get("similarity") or 0.0),
+                title=metadata.get("title"),
+                summary=metadata.get("summary") or ch.get("content"),
+                raw_minutes_preview=metadata.get("raw_minutes_preview"),
+                tags=metadata.get("tags"),
+                meet_id=metadata.get("meet_id"),
+                candidate_id=metadata.get("candidate_id"),
+                jd_interview_id=metadata.get("jd_interview_id"),
+            )
+            matches.append(match)
+
+        # Limitar a top_k por si el filtrado redujo o mantuvo la lista
+        matches = sorted(matches, key=lambda m: m.score, reverse=True)[: request.top_k]
+
+        return MeetingMinutesContextResponse(matches=matches)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        evaluation_logger.log_error("API", f"Error en meeting_minutes_context: {str(e)}")
+        raise HTTPException(status_code=500, detail="Error buscando minutas similares")
+
+
+@app.get(
+    "/meeting-minutes-context/{jd_interview_id}/{candidate_id}",
+    response_model=MeetingMinutesContextResponse,
+)
+async def meeting_minutes_context_path(
+    jd_interview_id: str,
+    candidate_id: str,
+    meet_id: str | None = None,
+    query: str = Query(..., description="Texto base para buscar minutas similares"),
+    top_k: int = 5,
+    match_threshold: float = 0.5,
+):
+    """
+    Variante del endpoint de contexto de minutas que recibe los identificadores
+    por path params para integraciones como ElevenLabs.
+
+    URL de ejemplo:
+    /meeting-minutes-context/{jd_interview_id}/{candidate_id}?query=...&top_k=5&match_threshold=0.5
+    """
+    req = MeetingMinutesContextRequest(
+        jd_interview_id=jd_interview_id,
+        candidate_id=candidate_id,
+        meet_id=meet_id,
+        query=query,
+        top_k=top_k,
+        match_threshold=match_threshold,
+    )
+    return await meeting_minutes_context(req)
 
 
 @app.post("/evaluate-meet", response_model=AnalysisResponse)
