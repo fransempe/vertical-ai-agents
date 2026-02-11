@@ -2,7 +2,21 @@
 import os
 from crewai import Agent
 from langchain_openai import ChatOpenAI
-from tools.supabase_tools import extract_supabase_conversations, fetch_job_description, send_evaluation_email, get_current_date, get_jd_interviews_data, get_candidates_data, get_all_jd_interviews, get_conversations_by_jd_interview, get_meet_evaluation_data, save_interview_evaluation, get_client_email, get_existing_meets_candidates
+from tools.supabase_tools import (
+    extract_supabase_conversations,
+    fetch_job_description,
+    send_evaluation_email,
+    get_current_date,
+    get_jd_interviews_data,
+    get_candidates_data,
+    get_all_jd_interviews,
+    get_conversations_by_jd_interview,
+    get_meet_evaluation_data,
+    save_interview_evaluation,
+    get_client_email,
+    get_existing_meets_candidates,
+    save_meeting_minute,
+)
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -370,4 +384,49 @@ def create_single_meet_evaluator_agent():
         verbose=True,
         llm=llm,
         max_iter=2,
+    )
+
+def create_meeting_minutes_agent():
+    """Crea el agente que genera y guarda una minuta breve de una entrevista individual (meet)."""
+    minute_agent_kwargs = dict(common_agent_kwargs)
+    # Para generar una buena minuta permitimos alguna iteración extra y algo de logging
+    minute_agent_kwargs.update({"max_iter": 2, "verbose": True})
+
+    return Agent(
+        role="Meeting Minutes & Interview Summary Specialist",
+        goal=(
+            "Generar y guardar una minuta breve, clara y estructurada de UNA sola entrevista "
+            "(meet), basada únicamente en la conversación real y los datos del candidato."
+        ),
+        backstory="""
+Eres un especialista en RRHH acostumbrado a redactar minutas ejecutivas de entrevistas.
+
+TU ÚNICA FUNCIÓN es:
+- Leer la conversación de una entrevista (meet) y los datos básicos del candidato y la JD.
+- Redactar una minuta NO extensa (máximo 10-15 líneas de texto corrido) en español latino.
+- Incluir: contexto de la búsqueda, breve perfil del candidato, puntos fuertes, riesgos/alertas
+  relevantes y próximos pasos sugeridos (si aplica).
+
+**REGLAS CRÍTICAS:**
+- NO inventes datos, empresas, proyectos ni experiencias que no estén en la conversación o en la BD.
+- Si algo no está claro en los datos, indícalo como "No hay información suficiente" en lugar de inventar.
+- La minuta debe ser entendible por un recruiter humano que no vio la entrevista.
+
+**PERSISTENCIA OBLIGATORIA:**
+- Después de construir mentalmente la minuta, debes llamar EXACTAMENTE UNA VEZ a la herramienta
+  `save_meeting_minute` usando:
+    - meet_id (de los datos que recibas)
+    - candidate_id
+    - jd_interview_id (si está disponible)
+    - title: un título corto (por ejemplo: "Minuta entrevista Frontend Sr. - Juan Pérez")
+    - raw_minutes: el texto completo de la minuta (8-15 líneas, no más)
+    - summary: un resumen ultra breve de 2-3 líneas con la esencia de la entrevista
+    - tags: lista corta de 3-6 tags (ej: ['frontend', 'senior', 'react', 'buena_comunicación'])
+
+Tu salida natural puede ser un breve texto o JSON, pero lo importante es que la llamada a
+`save_meeting_minute` se realice correctamente con esos campos.
+""",
+        tools=[save_meeting_minute],
+        llm=llm,
+        **minute_agent_kwargs,
     )
