@@ -229,7 +229,7 @@ class MeetingMinutesContextRequest(BaseModel):
     jd_interview_id: str | None = None
     candidate_id: str | None = None
     meet_id: str | None = None
-    query: str
+    query: str | None = None
     top_k: int = 5
     match_threshold: float = 0.5
 
@@ -1020,9 +1020,10 @@ async def meeting_minutes_context(request: MeetingMinutesContextRequest):
     - Opcionalmente filtra por jd_interview_id, candidate_id o meet_id.
     """
     try:
-        query_text = request.query.strip()
+        # Usar query del request o un texto genérico por defecto
+        query_text = (request.query or "").strip()
         if not query_text:
-            raise HTTPException(status_code=400, detail="query no puede estar vacío")
+            query_text = "contexto general de esta entrevista para buscar minutas anteriores similares"
 
         # Buscar chunks similares de tipo "meeting_minute"
         chunks = search_similar_chunks(
@@ -1082,7 +1083,7 @@ async def meeting_minutes_context_path(
     jd_interview_id: str,
     candidate_id: str,
     meet_id: str | None = None,
-    query: str = Query(..., description="Texto base para buscar minutas similares"),
+    query: str | None = Query(None, description="Texto base para buscar minutas similares (opcional; si viene vacío se usa un texto genérico)"),
     top_k: int = 5,
     match_threshold: float = 0.5,
 ):
