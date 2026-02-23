@@ -227,6 +227,16 @@ Debes realizar EXACTAMENTE las siguientes preguntas en este orden:
                     "model_id": model_id,
                     "voice_id": voice_id
                 }
+            },
+            "workflow": {
+                "tools": [
+                    {
+                        "id": "tool_1201kgt6wfcvf4cvvsd7w4w567s5",
+                        "type": "webhook",
+                        "name": "Agora-RRHH-candidate_info",
+                        "description": "Obtiene candidatos por ID para nutrir la respuesta del agente de VOZ."
+                    }
+                ]
             }
         }
         
