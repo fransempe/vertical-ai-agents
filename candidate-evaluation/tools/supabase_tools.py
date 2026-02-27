@@ -8,8 +8,10 @@ from crewai.tools import tool
 from supabase import create_client, Client
 from dotenv import load_dotenv
 import sys
+
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from utils.logger import evaluation_logger
+from utils.helpers import clean_uuid
 
 load_dotenv()
 
@@ -917,20 +919,57 @@ def save_meet_evaluation(full_result: str) -> str:
             }, indent=2, ensure_ascii=False)
         
         # Extraer technical_assessment, completeness_summary y alerts
+        # IMPORTANTE: technical_assessment está dentro de conversation_analysis
         technical_assessment_data = conversation_analysis.get('technical_assessment', {})
         
+        # Log de debug para verificar qué está llegando
+        evaluation_logger.log_task_progress(
+            "Guardar Meet Evaluation",
+            f"DEBUG - technical_assessment_data keys: {list(technical_assessment_data.keys()) if isinstance(technical_assessment_data, dict) else 'NO ES DICT'}"
+        )
+        evaluation_logger.log_task_progress(
+            "Guardar Meet Evaluation",
+            f"DEBUG - technical_assessment_data completo: {json.dumps(technical_assessment_data, indent=2, ensure_ascii=False)[:500]}"
+        )
+        
         # technical_assessment sin completeness_summary y alerts
+        # Asegurar que siempre sea un dict válido
+        if not isinstance(technical_assessment_data, dict):
+            technical_assessment_data = {}
+        
         technical_assessment = {
             "knowledge_level": technical_assessment_data.get('knowledge_level'),
             "practical_experience": technical_assessment_data.get('practical_experience'),
             "technical_questions": technical_assessment_data.get('technical_questions', [])
         }
         
-        # completeness_summary
+        # completeness_summary - está dentro de technical_assessment_data
         completeness_summary = technical_assessment_data.get('completeness_summary', {})
+        if not isinstance(completeness_summary, dict):
+            completeness_summary = {}
         
-        # alerts
+        # alerts - está dentro de technical_assessment_data
         alerts = technical_assessment_data.get('alerts', [])
+        if not isinstance(alerts, list):
+            alerts = []
+        
+        # Log de debug para verificar qué se va a guardar
+        evaluation_logger.log_task_progress(
+            "Guardar Meet Evaluation",
+            f"DEBUG - technical_assessment a guardar: {json.dumps(technical_assessment, indent=2, ensure_ascii=False)[:300]}"
+        )
+        evaluation_logger.log_task_progress(
+            "Guardar Meet Evaluation",
+            f"DEBUG - completeness_summary a guardar: {json.dumps(completeness_summary, indent=2, ensure_ascii=False)[:300]}"
+        )
+        evaluation_logger.log_task_progress(
+            "Guardar Meet Evaluation",
+            f"DEBUG - alerts a guardar: {alerts}"
+        )
+        evaluation_logger.log_task_progress(
+            "Guardar Meet Evaluation",
+            f"DEBUG - match_evaluation keys: {list(match_evaluation.keys()) if isinstance(match_evaluation, dict) else 'NO ES DICT'}"
+        )
         
         # Preparar datos para insertar
         now = datetime.now().isoformat()
@@ -1007,7 +1046,8 @@ def save_meet_evaluation(full_result: str) -> str:
         }, indent=2, ensure_ascii=False)
 
 
-@tool
+# COMENTADO: meeting_minutes_knowledge - función deshabilitada temporalmente
+# @tool
 def save_meeting_minute(
     meet_id: str,
     candidate_id: str,
@@ -1047,9 +1087,17 @@ def save_meeting_minute(
             evaluation_logger.log_error("Guardar Minuta de Meet", error_msg)
             return json.dumps({"success": False, "error": error_msg}, indent=2, ensure_ascii=False)
 
-        if not meet_id or not candidate_id:
-            error_msg = "meet_id y candidate_id son obligatorios"
-            evaluation_logger.log_error("Guardar Minuta de Meet", error_msg)
+        # Limpiar y validar UUIDs antes de usarlos en BD
+        cleaned_meet_id = clean_uuid(meet_id)
+        cleaned_candidate_id = clean_uuid(candidate_id)
+        cleaned_jd_interview_id = clean_uuid(jd_interview_id) if jd_interview_id else None
+
+        if not cleaned_meet_id or not cleaned_candidate_id:
+            error_msg = "meet_id y candidate_id válidos son obligatorios"
+            evaluation_logger.log_error(
+                "Guardar Minuta de Meet",
+                f"{error_msg} (meet_id='{meet_id}', candidate_id='{candidate_id}')",
+            )
             return json.dumps({"success": False, "error": error_msg}, indent=2, ensure_ascii=False)
 
         if not raw_minutes or not str(raw_minutes).strip():
@@ -1099,9 +1147,9 @@ def save_meeting_minute(
         now = datetime.now().isoformat()
 
         minute_data: dict[str, Any] = {
-            "meet_id": meet_id,
-            "candidate_id": candidate_id,
-            "jd_interview_id": jd_interview_id,
+            "meet_id": cleaned_meet_id,
+            "candidate_id": cleaned_candidate_id,
+            "jd_interview_id": cleaned_jd_interview_id,
             "title": title,
             "raw_minutes": raw_minutes,
             "summary": summary,

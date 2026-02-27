@@ -172,7 +172,7 @@ def create_elevenlabs_agent(
         
         # Usar el nombre del agente generado por el agente de CrewAI, o el proporcionado como fallback
         generated_agent_name = result_data.get('agent_name', '').strip()
-        if generated_agent_name:
+        if generated_agent_name and generated_agent_name.lower() != 'null':
             agent_name = generated_agent_name
             evaluation_logger.log_task_progress("Crear Agente ElevenLabs", f"Usando nombre de agente generado: {agent_name}")
         
@@ -183,18 +183,34 @@ def create_elevenlabs_agent(
         # Estructura obligatoria de la entrevista
         estructura_obligatoria = """
 
+Antes de la primera pregunta, llama SIEMPRE a get_candidate_info usando el candidate_id provisto. 
+El first message debe ir acompañado al nombre sin el apellido del candidato.
+Cuando preguntes sobre la experiencia y responsabilidades, apóyate en la información devuelta por get-candidate-info.
+
+Actúa como un entrevistador técnico profesional y amable, especializado en el rol específico descrito en la job_description de esta búsqueda.
+Tu tarea es adaptar dinámicamente la entrevista al puesto concreto (nivel, responsabilidades y stack/skills requeridos),
+centrándote siempre en:
+- La experiencia del candidato en funciones relevantes para ese rol.
+- Su capacidad para cumplir las responsabilidades clave del puesto.
+- Sus conocimientos técnicos y de dominio según lo que exige la descripción del trabajo.
+La entrevista debe tener un tono profesional pero cercano, enfocado en evaluar ajuste al rol buscado en particular.
+
 **ESTRUCTURA OBLIGATORIA DE LA ENTREVISTA:**
 
 Debes realizar EXACTAMENTE las siguientes preguntas en este orden:
 
-1. **2 PREGUNTAS DE HABILIDADES BLANDAS:**
-   - Realiza 2 preguntas sobre habilidades blandas del candidato
+1. **1 PREGUNTA DE RESPONSABILIDADES EN EXPERIENCIA LABORAL:**
+   - Realiza 1 pregunta sobre experiencia laboral del candidato
+   - Leer del JSON del get-candidate-info las propiedades "responsibilities" y "experiencia" y tomar algunas de las responsabilidades que tuvo el candidato para poder preguntar sobre esa responsabilidad.
+
+2. **1 PREGUNTA DE HABILIDADES BLANDAS:**
+   - Realiza 1 pregunta breve sobre habilidades blandas del candidato
    - Ejemplos: comunicación, trabajo en equipo, liderazgo, resolución de problemas, adaptabilidad, gestión del tiempo
-   - Estas preguntas deben evaluar las competencias interpersonales y profesionales del candidato
+   - Esta preguntas deben evaluar las competencias interpersonales y profesionales del candidato
    - Haz una pregunta a la vez y espera la respuesta antes de continuar
 
-2. **5 PREGUNTAS TÉCNICAS DEL PUESTO:**
-   - Realiza 5 preguntas técnicas específicas basadas en la descripción del puesto
+3. **3 PREGUNTAS TÉCNICAS DEL PUESTO:**
+   - Realiza 3 preguntas técnicas específicas basadas en la descripción del puesto
    - Las preguntas deben estar directamente relacionadas con las tecnologías, herramientas y conocimientos técnicos mencionados en la descripción del puesto
    - Sé específico y técnico, evaluando el conocimiento real del candidato
    - Haz una pregunta a la vez y espera la respuesta antes de continuar
@@ -204,14 +220,15 @@ Debes realizar EXACTAMENTE las siguientes preguntas en este orden:
 - Evalúa las respuestas del candidato de manera objetiva
 - Guía la conversación de manera estructurada
 - Responde en español de manera clara y concisa
-- NO hagas más de 2 preguntas de habilidades blandas
-- NO hagas más de 5 preguntas técnicas
-- Al finalizar las 7 preguntas, agradece al candidato y cierra la entrevista"""
+- NO hagas más de 1 pregunta sobre la experiencia del candidato 
+- NO hagas más de 1 pregunta de habilidades blandas y que sea breve
+- NO hagas más de 3 preguntas técnicas
+- Al finalizar las 5 preguntas, agradece al candidato y cierra la entrevista"""
         
         # Concatenar el prompt generado con la estructura obligatoria
         prompt_text = generated_prompt + estructura_obligatoria
         
-        # Preparar datos del agente
+        # Preparar datos del agente (configuración de conversación, TTS y tools en el prompt)
         eleven_labs_data = {
             "name": agent_name,
             "conversation_config": {
@@ -219,7 +236,9 @@ Debes realizar EXACTAMENTE las siguientes preguntas en este orden:
                     "first_message": first_message,
                     "prompt": {
                         "prompt": prompt_text,
-                        "llm": llm
+                        "llm": llm,
+                        # Asociar tools dentro del prompt, según esquema de ElevenLabs
+                        "tool_ids": ["tool_1201kgt6wfcvf4cvvsd7w4w567s5"],
                     },
                     "language": language
                 },
@@ -227,20 +246,10 @@ Debes realizar EXACTAMENTE las siguientes preguntas en este orden:
                     "model_id": model_id,
                     "voice_id": voice_id
                 }
-            },
-            "workflow": {
-                "tools": [
-                    {
-                        "id": "tool_1201kgt6wfcvf4cvvsd7w4w567s5",
-                        "type": "webhook",
-                        "name": "Agora-RRHH-candidate_info",
-                        "description": "Obtiene candidatos por ID para nutrir la respuesta del agente de VOZ."
-                    }
-                ]
             }
         }
         
-        # Crear agente
+        # Crear agente usando la configuración anterior
         response = client.conversational_ai.agents.create(**eleven_labs_data)
         
         evaluation_logger.log_task_complete(

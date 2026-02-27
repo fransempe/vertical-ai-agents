@@ -878,9 +878,6 @@ def create_single_meeting_minutes_task(agent, extraction_task, evaluation_task):
     """Tarea para generar y guardar una minuta breve de un meet específico"""
     return Task(
         description="""
-        ⏱️ Antes de comenzar, imprime: START SINGLE_MEET_MINUTE [YYYY-MM-DD HH:MM:SS]. 
-        Al finalizar, imprime: END SINGLE_MEET_MINUTE [YYYY-MM-DD HH:MM:SS].
-
         Tu objetivo es redactar UNA MINUTA BREVE de la entrevista (meet) y guardarla
         en la tabla meeting_minutes_knowledge usando la herramienta save_meeting_minute.
 
@@ -925,15 +922,28 @@ def create_single_meeting_minutes_task(agent, extraction_task, evaluation_task):
            - summary: el resumen ultra breve de 2-3 líneas
            - tags: la lista de tags que preparaste
 
-           ⚠️ REGLA CRÍTICA: NO llames a save_meeting_minute más de una vez.
-           ⚠️ Si por algún motivo faltan meet_id o candidate_id en los datos, 
-              explica claramente el motivo y NO llames a la herramienta.
+           ⚠️ REGLAS CRÍTICAS SOBRE LA LLAMADA A LA HERRAMIENTA:
+           - NO llames a save_meeting_minute más de una vez.
+           - NO envuelvas los argumentos en listas ni arrays.
+           - NO agregues timestamps ni valores extra en la entrada de la herramienta.
+           - La entrada de la herramienta debe ser SIEMPRE un diccionario clave-valor (key, value dict) con este formato EXACTO:
+             {
+               "meet_id": "<uuid>",
+               "candidate_id": "<uuid>",
+               "jd_interview_id": "<uuid_o_null>",
+               "title": "<titulo_corto>",
+               "raw_minutes": "<texto_de_8_a_15_lineas>",
+               "summary": "<resumen_de_2_a_3_lineas>",
+               "tags": ["tag1", "tag2", "tag3"]
+             }
+           - Si por algún motivo faltan meet_id o candidate_id en los datos, 
+             explica claramente el motivo y NO llames a la herramienta.
 
         🎯 SALIDA ESPERADA:
         - Confirmación de que se llamó a save_meeting_minute correctamente
-        - El ID de la minuta creada (minute_id) si la herramienta lo devuelve
+        - Explicación clara de si la minuta se guardó o no, y por qué.
         """,
-        expected_output="Confirmación de guardado de minuta con minute_id, o explicación clara de por qué no se pudo guardar.",
+        expected_output="Confirmación de guardado de minuta o explicación clara de por qué no se pudo guardar.",
         agent=agent,
         context=[extraction_task, evaluation_task],
     )
@@ -1129,6 +1139,18 @@ def create_single_meet_evaluation_task(agent, extraction_task):
         - Proyectos mencionados vs tipo de proyectos requeridos
         - Nivel de seniority demostrado vs requerido
         
+        ### Análisis Específico de Seniority del Candidato:
+        - Clasificar explícitamente el seniority requerido por la JD (por ejemplo: Trainee/Junior/Semi Senior/Senior/Lead/Head/Director).
+        - Inferir el seniority REAL del candidato a partir de:
+          * Años de experiencia total y en roles similares.
+          * Responsabilidades asumidas (liderazgo de equipos, definición de estrategia, gestión de P&L, reporting a C-level, etc.).
+          * Complejidad e impacto de los proyectos en los que participó.
+        - Comparar seniority requerido vs seniority demostrado y responder claramente:
+          * Si el candidato está por debajo, alineado o por encima del nivel esperado.
+          * Riesgos concretos si está por debajo (por ejemplo: falta de exposición estratégica, poca experiencia liderando equipos, etc.).
+          * Oportunidades si está por encima (por ejemplo: sobrecalificación, expectativas salariales, posibilidad de rol más amplio).
+        - Este análisis de seniority debe quedar en un bloque separado y explícito dentro de `match_evaluation.seniority_analysis`.
+        
         ## 4. ✅ **DETERMINACIÓN FINAL DE MATCH**
         Basado en todo el análisis, determinar:
         - **¿Es un posible match?** (SÍ/NO/CONDICIONAL)
@@ -1205,6 +1227,12 @@ def create_single_meet_evaluation_task(agent, extraction_task):
             }},
             "soft_skills_match": "análisis comparativo",
             "experience_match": "análisis comparativo",
+            "seniority_analysis": {{
+              "jd_seniority_required": "nivel de seniority requerido por la JD (por ejemplo: Senior/Lead/Director)",
+              "candidate_seniority_inferred": "nivel de seniority que realmente demuestra el candidato según la entrevista y su experiencia",
+              "alignment": "Debajo del requerido / Alineado / Por encima del requerido",
+              "summary": "análisis detallado (2-4 líneas) explicando por qué se clasifica así y qué riesgos u oportunidades implica"
+            }},
             "strengths": ["fortaleza1", "fortaleza2"],
             "concerns": ["preocupación1", "preocupación2"],
             "final_recommendation": "Recomendado/Condicional/No Recomendado",

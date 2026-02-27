@@ -4,11 +4,11 @@ Crew para evaluar un solo meet
 """
 
 from crewai import Crew, Process
-from agents import create_single_meet_evaluator_agent, create_meeting_minutes_agent
+from agents import create_single_meet_evaluator_agent  # , create_meeting_minutes_agent  # COMENTADO: meeting_minutes_knowledge
 from tasks import (
     create_single_meet_extraction_task,
     create_single_meet_evaluation_task,
-    create_single_meeting_minutes_task,
+    # create_single_meeting_minutes_task,  # COMENTADO: meeting_minutes_knowledge
 )
 from tools.supabase_tools import get_meet_evaluation_data
 
@@ -43,17 +43,18 @@ def create_single_meet_evaluation_crew(meet_id: str):
         
     # Crear agentes
     evaluator = create_single_meet_evaluator_agent()
-    minutes_agent = create_meeting_minutes_agent()
+    # minutes_agent = create_meeting_minutes_agent()  # COMENTADO: meeting_minutes_knowledge
 
     # Crear tareas
     extraction_task = create_single_meet_extraction_task(evaluator, meet_id)
     evaluation_task = create_single_meet_evaluation_task(evaluator, extraction_task)
-    minutes_task = create_single_meeting_minutes_task(minutes_agent, extraction_task, evaluation_task)
+    # minutes_task = create_single_meeting_minutes_task(minutes_agent, extraction_task, evaluation_task)  # COMENTADO: meeting_minutes_knowledge
 
-    # Crear crew: primero extrae, luego evalúa y finalmente genera/guarda la minuta
+    # Crear crew: primero extrae, luego evalúa
+    # COMENTADO: meeting_minutes_knowledge - ya no se genera/guarda la minuta
     crew = Crew(
-        agents=[evaluator, minutes_agent],
-        tasks=[extraction_task, evaluation_task, minutes_task],
+        agents=[evaluator],  # , minutes_agent],  # COMENTADO: meeting_minutes_knowledge
+        tasks=[extraction_task, evaluation_task],  # , minutes_task],  # COMENTADO: meeting_minutes_knowledge
         process=Process.sequential,
         verbose=True
     )
