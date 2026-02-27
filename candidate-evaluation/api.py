@@ -1163,42 +1163,123 @@ async def evaluate_single_meet(request: SingleMeetRequest):
         evaluation_logger.log_task_complete("API", f"Evaluación de meet completada - Tiempo: {execution_time}")
         
         # Extraer el contenido del resultado del crew
-        result_str = str(result)
-        # Intentar extraer JSON del resultado si es un CrewOutput
-        if hasattr(result, 'raw'):
-            result_str = result.raw
-        elif hasattr(result, 'content'):
-            result_str = result.content
-        else:
-            result_str = str(result)
-            
-        # Intentar parsear como JSON (puede venir en formato ```json ... ```)
         full_result = None
-        try:
-            # Buscar JSON dentro de markdown code blocks
-            json_match = re.search(r'```json\s*(\{.*\})\s*```', result_str, re.DOTALL)
-            if json_match:
-                full_result = json.loads(json_match.group(1))
+
+        # 1) Caso ideal: el resultado YA es un dict JSON
+        if isinstance(result, dict):
+            full_result = result
+        # 2) Caso CrewOutput u objeto similar con .raw/.content
+        elif hasattr(result, "raw") and isinstance(result.raw, dict):
+            full_result = result.raw
+        elif hasattr(result, "content") and isinstance(result.content, dict):
+            full_result = result.content
+        else:
+            # 3) Fallback: trabajar con string y buscar JSON dentro
+            result_str = None
+            if hasattr(result, "raw"):
+                result_str = result.raw
+            elif hasattr(result, "content"):
+                result_str = result.content
             else:
-                # Intentar parsear directamente
-                #full_result = result
-                full_result = json.loads(result_str) #Descomentar para usar el resultado original
-                
-        except (json.JSONDecodeError, AttributeError):
-            # Si no es JSON válido, intentar extraer cualquier JSON del texto
+                result_str = str(result)
+
+            # Intentar parsear como JSON (puede venir en formato ```json ... ```)
             try:
-                # Buscar cualquier objeto JSON en el texto
-                json_match = re.search(r'\{.*\}', result_str, re.DOTALL)
+                # Buscar JSON dentro de markdown code blocks
+                json_match = re.search(r"```json\s*(\{.*\})\s*```", result_str, re.DOTALL)
                 if json_match:
-                    full_result = json.loads(json_match.group(0))
+                    full_result = json.loads(json_match.group(1))
                 else:
-                    # Si todo falla, continuar con valores por defecto sin romper la API
-                    evaluation_logger.log_error("API", "No se pudo parsear el resultado como JSON (sin bloque JSON detectable)")
+                    # Intentar parsear directamente el string completo
+                    full_result = json.loads(result_str)
+            except (json.JSONDecodeError, AttributeError):
+                # Si no es JSON válido, intentar extraer cualquier objeto JSON del texto
+                try:
+                    json_match = re.search(r"\{.*\}", result_str, re.DOTALL)
+                    if json_match:
+                        full_result = json.loads(json_match.group(0))
+                    else:
+                        evaluation_logger.log_error(
+                            "API",
+                            "No se pudo parsear el resultado como JSON (sin bloque JSON detectable)",
+                        )
+                        full_result = {}
+                except Exception as parse_err:
+                    evaluation_logger.log_error(
+                        "API",
+                        f"No se pudo parsear el resultado como JSON: {parse_err}",
+                    )
                     full_result = {}
-            except Exception as parse_err:
-                # Continuar con valores por defecto sin lanzar 500
-                evaluation_logger.log_error("API", f"No se pudo parsear el resultado como JSON: {parse_err}")
-                full_result = {}
+
+        # ===== Fallback crítico: asegurar meet_id, candidate.id y jd_interview.id =====
+        if not isinstance(full_result, dict):
+            full_result = {}
+        
+        # Siempre asegurar que haya meet_id en el resultado final
+        if not full_result.get("meet_id"):
+            full_result["meet_id"] = meet_id
+
+        # Verificar si faltan candidate.id o jd_interview.id
+        candidate_obj = full_result.get("candidate") or {}
+        jd_obj = full_result.get("jd_interview") or {}
+        needs_candidate = not isinstance(candidate_obj, dict) or not candidate_obj.get("id")
+        needs_jd = not isinstance(jd_obj, dict) or not jd_obj.get("id")
+
+        if needs_candidate or needs_jd:
+            try:
+                # Reutilizar la función get_meet_evaluation_data para obtener datos mínimos
+                func_to_call = None
+                if hasattr(get_meet_evaluation_data, "__wrapped__"):
+                    func_to_call = get_meet_evaluation_data.__wrapped__
+                elif hasattr(get_meet_evaluation_data, "func"):
+                    func_to_call = get_meet_evaluation_data.func
+                elif hasattr(get_meet_evaluation_data, "_func"):
+                    func_to_call = get_meet_evaluation_data._func
+                elif callable(get_meet_evaluation_data) and not hasattr(get_meet_evaluation_data, "name"):
+                    func_to_call = get_meet_evaluation_data
+
+                if func_to_call:
+                    meet_data_json = func_to_call(meet_id)
+                    meet_data = json.loads(meet_data_json) if isinstance(meet_data_json, str) else meet_data_json
+
+                    conversation_data = meet_data.get("conversation") or {}
+                    jd_data = meet_data.get("jd_interview") or {}
+                    candidate_from_conv = conversation_data.get("candidate") or {}
+
+                    # Rellenar candidate.id (y datos básicos) si falta
+                    if needs_candidate and candidate_from_conv.get("id"):
+                        full_result["candidate"] = {
+                            "id": candidate_from_conv.get("id"),
+                            "name": candidate_from_conv.get("name"),
+                            "email": candidate_from_conv.get("email"),
+                            "phone": candidate_from_conv.get("phone"),
+                            "cv_url": candidate_from_conv.get("cv_url"),
+                            "tech_stack": candidate_from_conv.get("tech_stack"),
+                        }
+
+                    # Rellenar jd_interview.id si falta
+                    if needs_jd and jd_data.get("id"):
+                        # Copiar datos clave de la JD para que queden disponibles en la evaluación
+                        full_result["jd_interview"] = {
+                            "id": jd_data.get("id"),
+                            "interview_name": jd_data.get("interview_name"),
+                            "job_description": jd_data.get("job_description"),
+                            "tech_stack": jd_data.get("tech_stack"),
+                            "client_id": jd_data.get("client_id"),
+                            "created_at": jd_data.get("created_at"),
+                        }
+
+                    evaluation_logger.log_task_progress(
+                        "API",
+                        "full_result completado con meet_id/candidate.id/jd_interview.id desde get_meet_evaluation_data",
+                    )
+            except Exception as enrich_err:
+                # Si falla el enriquecimiento, lo registramos pero no rompemos la API
+                evaluation_logger.log_error(
+                    "API",
+                    f"Error enriqueciendo full_result con datos mínimos de meet: {enrich_err}",
+                )
+
         
         # Extraer solo los campos finales del match_evaluation
         result_data: dict[str, Any] = {
@@ -1208,6 +1289,8 @@ async def evaluate_single_meet(request: SingleMeetRequest):
             "compatibility_score": None,
             # Campo para exponer en el resultado final el resumen de emociones de voz
             "emotion_sentiment_summary": None,
+            # Campo para exponer un resumen del análisis de seniority
+            "seniority_analysis": None,
         }
         
         # Buscar en match_evaluation
@@ -1218,6 +1301,8 @@ async def evaluate_single_meet(request: SingleMeetRequest):
                 result_data["justification"] = match_eval.get("justification")
                 result_data["is_potential_match"] = match_eval.get("is_potential_match")
                 result_data["compatibility_score"] = match_eval.get("compatibility_score")
+                # Exponer también el bloque de análisis de seniority si está disponible
+                result_data["seniority_analysis"] = match_eval.get("seniority_analysis")
         
         # ===== Verificar si el agente procesó emotion_analysis =====
         # El agente ahora recibe emotion_analysis a través de get_meet_evaluation_data
