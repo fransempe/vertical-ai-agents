@@ -170,11 +170,32 @@ def create_elevenlabs_agent(
         generated_prompt = result_data.get('prompt', '')
         cliente_data = result_data.get('cliente', {})
         
-        # Usar el nombre del agente generado por el agente de CrewAI, o el proporcionado como fallback
-        generated_agent_name = result_data.get('agent_name', '').strip()
-        if generated_agent_name and generated_agent_name.lower() != 'null':
-            agent_name = generated_agent_name
-            evaluation_logger.log_task_progress("Crear Agente ElevenLabs", f"Usando nombre de agente generado: {agent_name}")
+        # Usar el nombre del agente generado por el agente de CrewAI, o el proporcionado como fallback.
+        # Evitar nombres inválidos como "null - Búsqueda XXX" o que contengan "null".
+        generated_agent_name = (result_data.get('agent_name') or '').strip()
+        if generated_agent_name:
+            # Si el LLM devolvió algo que contiene "null" lo consideramos inválido y usamos el fallback original.
+            if 'null' in generated_agent_name.lower():
+                evaluation_logger.log_task_progress(
+                    "Crear Agente ElevenLabs",
+                    f"Nombre de agente generado inválido detectado ('{generated_agent_name}'); usando fallback: {agent_name}",
+                )
+            else:
+                agent_name = generated_agent_name
+                evaluation_logger.log_task_progress(
+                    "Crear Agente ElevenLabs",
+                    f"Usando nombre de agente generado: {agent_name}",
+                )
+
+        # Asegurar que el nombre del agente incluya el nombre del cliente cuando esté disponible.
+        client_name = (cliente_data.get("nombre") or "").strip()
+        if client_name and client_name.lower() not in agent_name.lower():
+            original_name = agent_name
+            agent_name = f"{client_name} - {agent_name}"
+            evaluation_logger.log_task_progress(
+                "Crear Agente ElevenLabs",
+                f"Añadiendo nombre de cliente al agente: '{original_name}' -> '{agent_name}'",
+            )
         
         # Generar mensaje inicial si no se proporciona (después de obtener el nombre generado)
         if not first_message:
@@ -194,6 +215,16 @@ centrándote siempre en:
 - Su capacidad para cumplir las responsabilidades clave del puesto.
 - Sus conocimientos técnicos y de dominio según lo que exige la descripción del trabajo.
 La entrevista debe tener un tono profesional pero cercano, enfocado en evaluar ajuste al rol buscado en particular.
+
+Además, utiliza SIEMPRE la información disponible en la job_description para responder dudas del candidato sobre:
+- El cliente/empresa (tipo de cliente, sector, contexto del rol) cuando el candidato pregunte por ello.
+- El puesto a cubrir (título del rol, responsabilidades principales, tecnologías clave y nivel de seniority requerido).
+- El proceso de selección, explicando claramente:
+  1) Que esta es una entrevista virtual inicial (con el agente de voz).
+  2) Que luego habrá una entrevista con un recruiter humano.
+  3) Que después se realizará un análisis de la entrevista (evaluación y feedback interno).
+
+Si la job_description no trae suficiente información sobre alguno de estos puntos, explícalo de forma honesta y clara, sin inventar datos.
 
 **ESTRUCTURA OBLIGATORIA DE LA ENTREVISTA:**
 

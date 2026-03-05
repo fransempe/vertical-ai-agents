@@ -2126,8 +2126,10 @@ async def create_elevenlabs_agent_endpoint(request: CreateAgentRequest):
             error_msg = f"Error obteniendo email del cliente: {client_email_data.get('error')}"
             evaluation_logger.log_error("API", error_msg)
             raise HTTPException(status_code=400, detail=error_msg)
-        
+
+        # Email y nombre real del cliente desde la tabla clients
         sender_email = client_email_data.get('email', '')
+        client_name = client_email_data.get('name') or ''
         if not sender_email:
             error_msg = f"El cliente {client_id} no tiene email configurado"
             evaluation_logger.log_error("API", error_msg)
@@ -2136,8 +2138,18 @@ async def create_elevenlabs_agent_endpoint(request: CreateAgentRequest):
         # 3. Crear agente de ElevenLabs
         print(f"🤖 Creando agente de ElevenLabs...")
         print(f"   - Interview Name: {interview_name}")
-        print(f"   - Job Description: {job_description[:100]}...")
-        print(f"   - Sender Email: {sender_email}")
+        print(f"   - Job Description (original): {job_description[:100]}...")
+        print(f"   - Sender Email (cliente): {sender_email}")
+        if client_name:
+            print(f"   - Client Name (DB): {client_name}")
+        
+        # Enriquecer la job_description con el nombre del cliente si no está presente,
+        # para que el agente generador de prompt y el agente de voz puedan responder
+        # dudas sobre el cliente y usarlo en el nombre del agente.
+        job_description_for_agent = job_description
+        if client_name and "Cliente:" not in job_description:
+            job_description_for_agent = f"Cliente: {client_name} - Descripción del Puesto:\n{job_description}"
+            print("   - Job Description enriquecida con nombre de cliente para generación de prompt.")
         
         # Generar nombre temporal del agente (se actualizará con el generado por CrewAI)
         agent_name_temp = interview_name or f"Agente {jd_interview_id[:8]}"
@@ -2145,7 +2157,7 @@ async def create_elevenlabs_agent_endpoint(request: CreateAgentRequest):
         elevenlabs_result = create_elevenlabs_agent(
             agent_name=agent_name_temp,
             interview_name=interview_name,
-            job_description=job_description,
+            job_description=job_description_for_agent,
             sender_email=sender_email
         )
         
