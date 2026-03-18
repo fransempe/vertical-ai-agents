@@ -9,6 +9,7 @@ from utils.logger import evaluation_logger
 from agents import create_elevenlabs_prompt_generator_agent
 from tasks import create_elevenlabs_prompt_generation_task
 from crewai import Crew, Process
+from os import getenv
 
 load_dotenv()
 
@@ -258,7 +259,7 @@ Debes realizar EXACTAMENTE las siguientes preguntas en este orden:
         
         # Concatenar el prompt generado con la estructura obligatoria
         prompt_text = generated_prompt + estructura_obligatoria
-        
+        tool_id = getenv("ELEVENLABS_TOOL_ID")
         # Preparar datos del agente (configuración de conversación, TTS y tools en el prompt)
         eleven_labs_data = {
             "name": agent_name,
@@ -269,7 +270,7 @@ Debes realizar EXACTAMENTE las siguientes preguntas en este orden:
                         "prompt": prompt_text,
                         "llm": llm,
                         # Asociar tools dentro del prompt, según esquema de ElevenLabs
-                        "tool_ids": ["tool_1201kgt6wfcvf4cvvsd7w4w567s5"],
+                        "tool_ids": [tool_id],
                     },
                     "language": language
                 },
