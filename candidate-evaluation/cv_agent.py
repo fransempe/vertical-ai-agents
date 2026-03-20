@@ -54,6 +54,9 @@ def create_cv_analyzer_agent():
         - industries_and_sectors: Array de objetos con rubros/industrias ordenados por tiempo de experiencia
         - languages: Array de objetos con idiomas y sus niveles de competencia
         - certifications_and_courses: Array de objetos con certificaciones y cursos
+        - role_profile: Objeto con:
+          - role: Rol exacto del candidato según el CV (ej: "Desarrollador Frontend", "Backend Engineer", etc.)
+          - profile: Categoría UI (exactamente uno de: "Frontend"|"Backend"|"Fullstack"|"UX/UI"|"QA"|"Team Manager"|"Otro")
         - other: String con información relevante adicional (proyectos, publicaciones, premios, etc.)
         
         IMPORTANTE: 
