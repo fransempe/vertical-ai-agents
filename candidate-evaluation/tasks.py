@@ -970,7 +970,7 @@ def create_elevenlabs_prompt_generation_task(agent, interview_name: str, job_des
            - Herramientas y frameworks mencionados
            - Responsabilidades técnicas clave
            - Nivel de experiencia esperado
-           - Conocimientos específicos necesarios
+           - Conocimientos específicos necesarios 
         
         2. Crea un prompt que:
            - Defina el rol del entrevistador como un profesional técnico especializado en estas tecnologías
