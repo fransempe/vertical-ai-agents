@@ -37,7 +37,8 @@ def create_cv_analysis_crew(filename: str, user_id: str = None, client_id: str =
            - Email de contacto
            - Teléfono de contacto
            - LinkedIn: URL del perfil de LinkedIn (si está presente en el CV)
-           - Tech_stack: Array con todas las tecnologías, lenguajes, frameworks y herramientas mencionadas
+           - Tech_stack: Array con todas las tecnologías detectadas en el CV.
+             REQUISITO: debe coincidir exactamente con `extracted_hints.technologies_found` (solo lo detectado, sin inventar).
            - INFORMACIÓN ADICIONAL (para el campo observations en formato JSON):
              * work_experience: Array de objetos con experiencia laboral desde la más reciente hasta la más antigua. Cada objeto debe tener: company (empresa), position (cargo), period (período en formato "MM/YYYY - MM/YYYY" o "MM/YYYY - Present"), duration_months (duración aproximada en meses), responsibilities (array de responsabilidades principales)
              * industries_and_sectors: Array de objetos con rubros/industrias ordenados por tiempo de experiencia (de mayor a menor). Cada objeto debe tener: industry (nombre del rubro), experience_months (tiempo aproximado en meses)
@@ -125,7 +126,8 @@ def create_cv_analysis_crew(filename: str, user_id: str = None, client_id: str =
         
         INSTRUCCIONES IMPORTANTES:
         - Si algún dato no está presente, usa arrays vacíos [] o null según corresponda
-        - Para tech_stack, incluye TODAS las tecnologías mencionadas (lenguajes, frameworks, bases de datos, cloud, etc.)
+        - Para tech_stack, usa EXCLUSIVAMENTE las tecnologias detectadas por la herramienta `extract_candidate_data`
+          en `extracted_hints.technologies_found` (solo lo que aparece en el CV, sin inventar)
         - Para observations, DEBES generar un JSON válido con la estructura especificada
         - El JSON debe ser parseable y estar correctamente formateado
         - No inventes información que no esté en el CV

@@ -45,8 +45,8 @@ def create_cv_analyzer_agent():
         Tu enfoque es meticuloso y preciso. Siempre extraes la información exactamente como aparece en el CV,
         sin inventar o asumir datos que no están presentes.
         
-        Para el tech_stack, identificas todas las tecnologías, lenguajes de programación, frameworks, 
-        herramientas y plataformas mencionadas en el CV, creando un array completo y sin duplicados.
+        Para el `tech_stack`, TENES QUE basarte SOLO en lo detectado por la herramienta `extract_candidate_data`
+        en el array `extracted_hints.technologies_found`. No agregues tecnologías adicionales que no existan en el CV.
         
         EXTRACCIÓN DE INFORMACIÓN ADICIONAL:
         Además de los datos básicos, debes extraer y estructurar en formato JSON:
@@ -59,10 +59,15 @@ def create_cv_analyzer_agent():
           - profile: Categoría UI (exactamente uno de: "Frontend"|"Backend"|"Fullstack"|"UX/UI"|"QA"|"Team Manager"|"Otro")
         - other: String con información relevante adicional (proyectos, publicaciones, premios, etc.)
         
+        Para el `role_profile`, basate SOLO en:
+        1) `extracted_hints.suggested_role` para el campo `role`
+        2) `extracted_hints.suggested_profile` para el campo `profile`
+        Nunca inventes valores; si no se detecta nada, devolvé 'Otro'.
+
         IMPORTANTE: 
         - Si algún dato no está presente en el CV, usa arrays vacíos [] o null según corresponda
         - Para nombres, extraes el nombre completo tal como aparece
-        - Para tech_stack, incluyes todo lo relevante sin inventar
+        - Para tech_stack, incluyes EXCLUSIVAMENTE lo detectado en `extracted_hints.technologies_found`
         - Para observations, DEBES generar un JSON válido y correctamente formateado con la estructura especificada
         - El JSON debe ser parseable y estar en formato string cuando se pase a create_candidate
         - Siempre respondes en español con formato estructurado y claro

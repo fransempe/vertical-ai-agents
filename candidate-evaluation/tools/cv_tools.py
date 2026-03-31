@@ -417,24 +417,111 @@ def extract_candidate_data(cv_text: str) -> str:
         # Normalizar URLs de LinkedIn (agregar https:// si falta)
         linkedin_urls = [url if url.startswith('http') else f'https://{url}' for url in linkedin_urls]
         
-        # Tecnologías comunes (lista base para ayudar al agente)
+        # Tecnologias comunes (lista base para ayudar a detectar "sin inventar").
+        # Nota: solo se agregan al tech_stack si aparecen literalmente en el CV (case-insensitive).
         common_techs = [
             'Python', 'JavaScript', 'TypeScript', 'Java', 'C#', 'C++', 'Ruby', 'PHP', 'Go', 'Rust',
-            'React', 'Angular', 'Vue', 'Node.js', 'Express', 'Django', 'Flask', 'FastAPI', 'Spring',
+            'React', 'ReactJS', 'Next.js', 'NextJS', 'Angular', 'Vue', 'Nuxt', 'Svelte',
+            'Node.js', 'Node', 'Express', 'Django', 'Flask', 'FastAPI', 'Spring', 'NestJS',
             'SQL', 'PostgreSQL', 'MySQL', 'MongoDB', 'Redis', 'Elasticsearch',
             'AWS', 'Azure', 'GCP', 'Docker', 'Kubernetes', 'Git', 'CI/CD', 'Jenkins',
             'HTML', 'CSS', 'SASS', 'LESS', 'Bootstrap', 'Tailwind',
-            'REST', 'GraphQL', 'gRPC', 'WebSocket',
+            'REST', 'GraphQL', 'gRPC', 'WebSocket', 'RESTful',
             'TensorFlow', 'PyTorch', 'Scikit-learn', 'Pandas', 'NumPy'
+            ,
+            # QA / testing
+            'Testing', 'Jest', 'Cypress', 'Selenium', 'QA', 'Quality', 'Playwright', 'Robot Framework',
+            # DevOps / process
+            'Terraform', 'Helm', 'CI', 'CD', 'Agile', 'Scrum', 'Kanban', 'Jira',
+            # Management / leadership
+            'Lead', 'Tech Lead', 'Team Lead', 'Liderazgo', 'Lider', 'Leadership',
+            # UX / design
+            'Figma', 'UX', 'UI', 'Wireframe'
         ]
         
-        # Buscar tecnologías mencionadas (case-insensitive)
+        # Buscar tecnologias mencionadas (case-insensitive)
         found_techs = []
         cv_text_lower = cv_text.lower()
         for tech in common_techs:
             if tech.lower() in cv_text_lower:
                 found_techs.append(tech)
-        
+
+        # Normalizar sugerencias (sin inventar): mapear un posible rol/perfil a partir
+        # del texto y de las tecnologias detectadas en el CV.
+        role_titles_found: list[str] = []
+        role_categories_found: list[str] = []
+
+        # Patrones de titulos (ingles/espanol).
+        # Importante: se guardan SOLO si aparecen en el CV (no inventamos).
+        # El primer grupo (group(1)) intenta capturar una "frase" mas cercana a un titulo real.
+        role_patterns: list[tuple[str, str]] = [
+            (r'\b(full[-\s]?stack(?:\s+(?:developer|engineer))?)\b', 'Fullstack'),
+            (r'\b(frontend(?:\s+(?:developer|engineer))?)\b', 'Frontend'),
+            (r'\b(backend(?:\s+(?:developer|engineer))?)\b', 'Backend'),
+            (r'\b(qa(?:\s+(?:engineer|tester))?|quality assurance|quality)\b', 'QA'),
+            (r'\b(ux\/ui|ui\/ux|ux(?:\s+designer)?)\b', 'UX/UI'),
+            (r'\b(tech lead|team lead|líder tecnico|lider tecnico|lider de equipo)\b', 'Team Manager'),
+            # People / RRHH (mapeado a Team Manager para mantener compatibilidad de categorias en UI)
+            (r'\b(rrhh|recursos humanos|human resources|people(?:\s+(?:ops|manager|partner))?|hr(?:\s+manager|\s+business\s+partner|\s*bp)?|hrbp|talent acquisition|recruiter|seleccionador(?:a)?|reclutador(?:a)?)\b', 'Team Manager'),
+        ]
+
+        # Buscar coincidencias usando los patrones (siempre desde el texto del CV)
+        for pattern, category in role_patterns:
+            match = re.search(pattern, cv_text, flags=re.IGNORECASE)
+            if match:
+                role_titles_found.append((match.group(1) if match.groups() else match.group(0)).strip())
+                role_categories_found.append(category)
+
+        # Inferir perfil por tech_stack detectado
+        stack = [t.lower() for t in found_techs]
+        frontendTechs = ['react', 'angular', 'vue', 'javascript', 'typescript', 'next.js', 'nextjs', 'svelte', 'nuxt']
+        backendTechs = ['node', 'node.js', 'python', 'java', 'c#', 'php', 'go', 'rust', '.net', 'django', 'flask', 'fastapi', 'spring', 'nestjs']
+        databaseTechs = ['mongodb', 'postgresql', 'mysql', 'sql', 'elasticsearch', 'redis']
+        devopsTechs = ['aws', 'azure', 'gcp', 'docker', 'kubernetes', 'terraform', 'helm', 'devops', 'ci/cd', 'scrum', 'kanban', 'jenkins']
+        designTechs = ['figma', 'ux', 'ui', 'design', 'wireframe']
+        qaTechs = ['qa', 'testing', 'jest', 'cypress', 'selenium', 'playwright', 'robot framework', 'quality']
+        managementTechs = ['scrum', 'agile', 'lead', 'tech lead', 'team lead', 'leadership', 'lider', 'liderazgo', 'management']
+
+        hasFrontend = any(tech in ' '.join(stack) for tech in frontendTechs)
+        hasBackend = any(tech in ' '.join(stack) for tech in backendTechs) or any(tech in ' '.join(stack) for tech in databaseTechs)
+        hasDevOps = any(tech in ' '.join(stack) for tech in devopsTechs)
+        hasDesign = any(tech in ' '.join(stack) for tech in designTechs)
+        hasQA = any(tech in ' '.join(stack) for tech in qaTechs)
+        hasManagement = any(tech in ' '.join(stack) for tech in managementTechs)
+
+        suggested_profile = 'Otro'
+        if hasFrontend and hasBackend:
+            suggested_profile = 'Fullstack'
+        elif hasDesign:
+            suggested_profile = 'UX/UI'
+        elif hasQA:
+            suggested_profile = 'QA'
+        elif hasManagement:
+            suggested_profile = 'Team Manager'
+        elif hasFrontend:
+            suggested_profile = 'Frontend'
+        elif hasBackend:
+            suggested_profile = 'Backend'
+        elif hasDevOps:
+            suggested_profile = 'DevOps'
+
+        # Fallback por titulo detectado en CV (incluye People/RRHH)
+        # para evitar que perfiles con señales claras terminen en "Otro".
+        if suggested_profile == 'Otro' and role_categories_found:
+            suggested_profile = role_categories_found[0]
+
+        # Rol exacto: si detectamos un titulo en el CV, lo usamos.
+        # Si no detectamos titulo, usamos el label de perfil (para evitar 'Otro' cuando hay señales).
+        suggested_role = role_titles_found[0] if role_titles_found else (suggested_profile if suggested_profile != 'Otro' else 'Otro')
+
+        # Deduplicar techs (preservando orden)
+        deduped_found_techs: list[str] = []
+        seen = set()
+        for t in found_techs:
+            if t not in seen:
+                deduped_found_techs.append(t)
+                seen.add(t)
+
         return json.dumps({
             "success": True,
             "cv_text": cv_text,
@@ -442,7 +529,11 @@ def extract_candidate_data(cv_text: str) -> str:
                 "emails_found": emails,
                 "phones_found": phones,
                 "linkedin_urls_found": linkedin_urls,
-                "technologies_found": found_techs
+                "technologies_found": deduped_found_techs,
+                "role_titles_found": role_titles_found,
+                # Sugerencias para role_profile (derivadas solo de lo detectado en el CV)
+                "suggested_role": suggested_role,
+                "suggested_profile": suggested_profile,
             },
             "note": "Use estos hints para ayudarte a extraer y estructurar los datos del candidato"
         }, indent=2, ensure_ascii=False)
