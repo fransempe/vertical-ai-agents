@@ -264,7 +264,9 @@ Debes realizar EXACTAMENTE las siguientes preguntas en este orden:
         eleven_labs_data = {
             "name": agent_name,
             "conversation_config": {
-                "max_duration_seconds": 800,
+                "conversation": {
+                    "max_duration_seconds": 7200,
+                    },
                 "agent": {
                     "first_message": first_message,
                     "prompt": {
