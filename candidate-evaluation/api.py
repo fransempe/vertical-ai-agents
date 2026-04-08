@@ -18,6 +18,7 @@ from pathlib import Path
 from contextlib import asynccontextmanager
 from typing import Dict, Optional, List, Any
 from fastapi import FastAPI, HTTPException, Request, BackgroundTasks, Response, Query
+from fastapi.concurrency import run_in_threadpool
 import httpx
 from pydantic import BaseModel
 from crew import create_data_processing_crew
@@ -462,7 +463,7 @@ async def read_cv(request: CVRequest):
         print("🚀 INICIANDO EJECUCIÓN DEL CREW (CV Analysis)")
         print("=" * 80)
         
-        result = crew.kickoff()
+        result = await run_in_threadpool(crew.kickoff)
         
         # Calcular tiempo de ejecución
         end_time = datetime.now()
@@ -1137,7 +1138,7 @@ async def evaluate_single_meet(request: SingleMeetRequest):
         print("🚀 INICIANDO EJECUCIÓN DEL CREW (Single Meet Evaluation)")
         print("=" * 80)
         
-        result = crew.kickoff()
+        result = await run_in_threadpool(crew.kickoff)
         
         #RECORDAR DESCOMENTAR LA LINEA QUE HACE EL FULL_RESULT = RESULT
         print("Cargando datos mockados desde utils/data.json")
