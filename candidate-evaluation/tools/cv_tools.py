@@ -417,34 +417,95 @@ def extract_candidate_data(cv_text: str) -> str:
         # Normalizar URLs de LinkedIn (agregar https:// si falta)
         linkedin_urls = [url if url.startswith('http') else f'https://{url}' for url in linkedin_urls]
         
-        # Tecnologias comunes (lista base para ayudar a detectar "sin inventar").
-        # Nota: solo se agregan al tech_stack si aparecen literalmente en el CV (case-insensitive).
-        common_techs = [
-            'Python', 'JavaScript', 'TypeScript', 'Java', 'C#', 'C++', 'Ruby', 'PHP', 'Go', 'Rust',
-            'React', 'ReactJS', 'Next.js', 'NextJS', 'Angular', 'Vue', 'Nuxt', 'Svelte',
-            'Node.js', 'Node', 'Express', 'Django', 'Flask', 'FastAPI', 'Spring', 'NestJS',
-            'SQL', 'PostgreSQL', 'MySQL', 'MongoDB', 'Redis', 'Elasticsearch',
-            'AWS', 'Azure', 'GCP', 'Docker', 'Kubernetes', 'Git', 'CI/CD', 'Jenkins',
-            'HTML', 'CSS', 'SASS', 'LESS', 'Bootstrap', 'Tailwind',
-            'REST', 'GraphQL', 'gRPC', 'WebSocket', 'RESTful',
-            'TensorFlow', 'PyTorch', 'Scikit-learn', 'Pandas', 'NumPy'
-            ,
-            # QA / testing
-            'Testing', 'Jest', 'Cypress', 'Selenium', 'QA', 'Quality', 'Playwright', 'Robot Framework',
-            # DevOps / process
-            'Terraform', 'Helm', 'CI', 'CD', 'Agile', 'Scrum', 'Kanban', 'Jira',
-            # Management / leadership
-            'Lead', 'Tech Lead', 'Team Lead', 'Liderazgo', 'Lider', 'Leadership',
-            # UX / design
-            'Figma', 'UX', 'UI', 'Wireframe'
+        # Detección de stack por regex/aliases (evita falsos positivos por substring como "go", "git", etc.).
+        # Incluye perfiles tech y no-tech (RRHH, contable, administrativo) mediante herramientas concretas.
+        tech_patterns: list[tuple[str, list[str]]] = [
+            ("Python", [r"\bpython\b"]),
+            ("JavaScript", [r"\bjavascript\b", r"\bjs\b"]),
+            ("TypeScript", [r"\btypescript\b", r"\bts\b"]),
+            ("Java", [r"\bjava\b"]),
+            ("C#", [r"\bc#\b", r"\bcsharp\b"]),
+            ("C++", [r"\bc\+\+\b", r"\bcpp\b"]),
+            ("Ruby", [r"\bruby\b"]),
+            ("PHP", [r"\bphp\b"]),
+            # Go: no usar \bgo\b solo, para evitar falsos positivos semánticos
+            ("Go", [r"\bgolang\b", r"\bgo\s+(?:language|developer|engineer|backend)\b", r"\blanguage\s*:\s*go\b"]),
+            ("Rust", [r"\brust\b"]),
+            ("React", [r"\breact\b", r"\breactjs\b"]),
+            ("Next.js", [r"\bnext\.?js\b"]),
+            ("Angular", [r"\bangular\b"]),
+            ("Vue", [r"\bvue(?:\.js)?\b"]),
+            ("Nuxt", [r"\bnuxt(?:\.js)?\b"]),
+            ("Svelte", [r"\bsvelte\b"]),
+            ("Node.js", [r"\bnode\.?js\b", r"\bnode\b"]),
+            ("Express", [r"\bexpress(?:\.js)?\b"]),
+            ("Django", [r"\bdjango\b"]),
+            ("Flask", [r"\bflask\b"]),
+            ("FastAPI", [r"\bfastapi\b"]),
+            ("Spring", [r"\bspring(?:\s+boot)?\b"]),
+            ("NestJS", [r"\bnest(?:\.?js)?\b"]),
+            ("SQL", [r"\bsql\b"]),
+            ("PostgreSQL", [r"\bpostgres(?:ql)?\b"]),
+            ("MySQL", [r"\bmysql\b"]),
+            ("MongoDB", [r"\bmongo(?:db)?\b"]),
+            ("Redis", [r"\bredis\b"]),
+            ("Elasticsearch", [r"\belasticsearch\b"]),
+            ("AWS", [r"\baws\b", r"\bamazon web services\b"]),
+            ("Azure", [r"\bazure\b"]),
+            ("GCP", [r"\bgcp\b", r"\bgoogle cloud\b"]),
+            ("Docker", [r"\bdocker\b"]),
+            ("Kubernetes", [r"\bkubernetes\b", r"\bk8s\b"]),
+            ("Jenkins", [r"\bjenkins\b"]),
+            ("Terraform", [r"\bterraform\b"]),
+            ("Helm", [r"\bhelm\b"]),
+            ("HTML", [r"\bhtml5?\b"]),
+            ("CSS", [r"\bcss3?\b", r"\bcss\b"]),
+            ("SASS", [r"\bsass\b"]),
+            ("LESS", [r"\bless\b"]),
+            ("Bootstrap", [r"\bbootstrap\b"]),
+            ("Tailwind", [r"\btailwind(?:css)?\b"]),
+            ("REST", [r"\brest(?:ful)?\b"]),
+            ("GraphQL", [r"\bgraphql\b"]),
+            ("gRPC", [r"\bgrpc\b"]),
+            ("WebSocket", [r"\bwebsocket\b", r"\bwebsockets\b"]),
+            ("TensorFlow", [r"\btensorflow\b"]),
+            ("PyTorch", [r"\bpytorch\b"]),
+            ("Scikit-learn", [r"\bscikit[-\s]?learn\b", r"\bsklearn\b"]),
+            ("Pandas", [r"\bpandas\b"]),
+            ("NumPy", [r"\bnumpy\b"]),
+            ("Jest", [r"\bjest\b"]),
+            ("Cypress", [r"\bcypress\b"]),
+            ("Selenium", [r"\bselenium\b"]),
+            ("Playwright", [r"\bplaywright\b"]),
+            ("Robot Framework", [r"\brobot framework\b"]),
+            ("Figma", [r"\bfigma\b"]),
+            # Herramientas transversales / business (no-tech profiles)
+            ("Excel", [r"\bexcel\b", r"\bmicrosoft excel\b"]),
+            ("Power BI", [r"\bpower\s*bi\b"]),
+            ("Tableau", [r"\btableau\b"]),
+            ("Looker Studio", [r"\blooker\s*studio\b", r"\bgoogle\s*data\s*studio\b"]),
+            ("SAP", [r"\bsap\b", r"\bsap\s*(?:fi|co|mm|sd|hcm)\b"]),
+            ("Oracle", [r"\boracle\b"]),
+            ("QuickBooks", [r"\bquickbooks\b"]),
+            ("Xero", [r"\bxero\b"]),
+            ("Bejerman", [r"\bbejerman\b"]),
+            ("Tango Gestión", [r"\btango\s*gesti[oó]n\b", r"\btango\s*gestion\b"]),
+            ("Workday", [r"\bworkday\b"]),
+            ("SuccessFactors", [r"\bsuccessfactors\b", r"\bsap\s*successfactors\b"]),
+            ("BambooHR", [r"\bbamboohr\b"]),
+            ("Greenhouse", [r"\bgreenhouse\b"]),
+            ("Lever", [r"\blever\b"]),
+            ("ATS", [r"\bats\b", r"\bapplicant tracking system\b"]),
+            ("Payroll", [r"\bpayroll\b", r"\bliquidaci[oó]n de sueldos\b", r"\bliquidacion de sueldos\b"]),
+            ("AFIP", [r"\bafip\b"]),
+            ("Trello", [r"\btrello\b"]),
+            ("Asana", [r"\basana\b"]),
         ]
-        
-        # Buscar tecnologias mencionadas (case-insensitive)
-        found_techs = []
-        cv_text_lower = cv_text.lower()
-        for tech in common_techs:
-            if tech.lower() in cv_text_lower:
-                found_techs.append(tech)
+
+        found_techs: list[str] = []
+        for canonical_name, patterns in tech_patterns:
+            if any(re.search(pattern, cv_text, flags=re.IGNORECASE) for pattern in patterns):
+                found_techs.append(canonical_name)
 
         # Normalizar sugerencias (sin inventar): mapear un posible rol/perfil a partir
         # del texto y de las tecnologias detectadas en el CV.
@@ -481,6 +542,11 @@ def extract_candidate_data(cv_text: str) -> str:
         designTechs = ['figma', 'ux', 'ui', 'design', 'wireframe']
         qaTechs = ['qa', 'testing', 'jest', 'cypress', 'selenium', 'playwright', 'robot framework', 'quality']
         managementTechs = ['scrum', 'agile', 'lead', 'tech lead', 'team lead', 'leadership', 'lider', 'liderazgo', 'management']
+        businessOpsTechs = [
+            'excel', 'power bi', 'tableau', 'looker studio',
+            'sap', 'oracle', 'quickbooks', 'xero', 'bejerman', 'tango gestión', 'tango gestion',
+            'workday', 'successfactors', 'bamboohr', 'greenhouse', 'lever', 'ats', 'payroll', 'afip'
+        ]
 
         hasFrontend = any(tech in ' '.join(stack) for tech in frontendTechs)
         hasBackend = any(tech in ' '.join(stack) for tech in backendTechs) or any(tech in ' '.join(stack) for tech in databaseTechs)
@@ -488,6 +554,7 @@ def extract_candidate_data(cv_text: str) -> str:
         hasDesign = any(tech in ' '.join(stack) for tech in designTechs)
         hasQA = any(tech in ' '.join(stack) for tech in qaTechs)
         hasManagement = any(tech in ' '.join(stack) for tech in managementTechs)
+        hasBusinessOps = any(tech in ' '.join(stack) for tech in businessOpsTechs)
 
         suggested_profile = 'Otro'
         if hasFrontend and hasBackend:
@@ -497,6 +564,9 @@ def extract_candidate_data(cv_text: str) -> str:
         elif hasQA:
             suggested_profile = 'QA'
         elif hasManagement:
+            suggested_profile = 'Team Manager'
+        elif hasBusinessOps:
+            # Perfil funcional/no-tech (RRHH, administración, contable) dentro de categorías actuales de UI.
             suggested_profile = 'Team Manager'
         elif hasFrontend:
             suggested_profile = 'Frontend'
