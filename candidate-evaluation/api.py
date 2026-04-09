@@ -8,7 +8,6 @@ import json
 import base64
 import re
 import requests
-import tiktoken
 import uuid
 from uuid import UUID
 from utils.helpers import clean_uuid, is_valid_uuid
@@ -17,91 +16,20 @@ from datetime import datetime
 from pathlib import Path
 from contextlib import asynccontextmanager
 from typing import Dict, Optional, List, Any
-from fastapi import FastAPI, HTTPException, Request, BackgroundTasks, Response, Query
+from fastapi import FastAPI, HTTPException, Response
 from fastapi.concurrency import run_in_threadpool
-import httpx
 from pydantic import BaseModel
-from crew import create_data_processing_crew
 from cv_crew import create_cv_analysis_crew
 from matching_crew import create_candidate_matching_crew
-from filtered_crew import create_filtered_data_processing_crew
 from single_meet_crew import create_single_meet_evaluation_crew
 from utils.logger import evaluation_logger
 from supabase import create_client
-from tracking import TokenTracker
-from tools.token_estimator import estimate_cost, estimate_task_tokens, estimate_completion_tokens, breakdown_context_tokens
 from tools.supabase_tools import get_meet_evaluation_data, save_meet_evaluation, get_client_email
 from tools.elevenlabs_tools import create_elevenlabs_agent, generate_elevenlabs_prompt_from_jd, update_elevenlabs_agent_prompt
 from tools.vector_tools import search_similar_chunks, get_supabase_client
-from agents import create_single_meet_evaluator_agent
-from tasks import create_single_meet_extraction_task, create_single_meet_evaluation_task
-
-
-GRAPH_TENANT_ID = os.getenv("GRAPH_TENANT_ID", "")
-GRAPH_CLIENT_ID = os.getenv("GRAPH_CLIENT_ID", "")
-GRAPH_CLIENT_SECRET = os.getenv("GRAPH_CLIENT_SECRET", "")
-GRAPH_CLIENT_STATE = os.getenv("GRAPH_CLIENT_STATE", "")  # Debe coincidir con el usado al crear la suscripción
-GRAPH_SCOPE = os.getenv("GRAPH_SCOPE", "https://graph.microsoft.com/.default")
-GRAPH_BASE = os.getenv("GRAPH_BASE", "https://graph.microsoft.com/v1.0")
-OUTLOOK_USER_ID = os.getenv("OUTLOOK_USER_ID", "")
-
-
-# ====== Validations ======
-
 
 
 # ====== Helpers ======
-
-async def get_graph_app_token() -> str:
-    """
-    Obtiene un token de app (client credentials).
-    Requiere permisos de aplicación (Application) en Graph y admin consent.
-    """
-    token_url = f"https://login.microsoftonline.com/{GRAPH_TENANT_ID}/oauth2/v2.0/token"
-    data = {
-        "client_id": GRAPH_CLIENT_ID,
-        "client_secret": GRAPH_CLIENT_SECRET,
-        "grant_type": "client_credentials",
-        "scope": GRAPH_SCOPE,
-    }
-    async with httpx.AsyncClient(timeout=10) as client:
-        resp = await client.post(token_url, data=data)
-        resp.raise_for_status()
-        return resp.json()["access_token"]
-
-def parse_resource_path(resource: str) -> tuple[str | None, str | None]:
-    """
-    Intenta extraer userId y messageId desde el string 'resource' de la notificación.
-    Ejemplos de 'resource':
-      - "Users/{userId}/MailFolders('inbox')/Messages('ABC123')"
-      - "Users/{userId}/Messages('ABC123')"
-    """
-    user_id, message_id = None, None
-    try:
-        # Normalizá para búsquedas simples
-        r = resource.replace('"', "'")
-        # userId entre "Users/" y la siguiente "/"
-        if "Users/" in r:
-            user_part = r.split("Users/")[1]
-            user_id = user_part.split("/")[0]
-        # messageId entre "Messages('" y "')"
-        if "Messages('" in r:
-            message_id = r.split("Messages('")[1].split("')")[0]
-    except Exception:
-        pass
-    return user_id, message_id
-
-async def fetch_message(user_id: str, message_id: str, token: str) -> dict:
-    """
-    Lee el mensaje desde Graph.
-    Ajustá $select si querés traer más/menos campos.
-    """
-    url = f"{GRAPH_BASE}/users/{user_id}/messages/{message_id}?$select=subject,from,receivedDateTime,bodyPreview,isRead,webLink"
-    headers = {"Authorization": f"Bearer {token}"}
-    async with httpx.AsyncClient(timeout=15) as client:
-        r = await client.get(url, headers=headers)
-        r.raise_for_status()
-        return r.json()
 
 def format_soft_skills(soft_skills: dict) -> str:
     """Formatea las habilidades blandas para el email"""
@@ -210,9 +138,6 @@ app = FastAPI(
 # Storage para runs (en producción usar Redis o DB)
 matching_runs: Dict[str, dict] = {}
 
-class AnalysisRequest(BaseModel):
-    jd_interview_id: str = None
-
 class SingleMeetRequest(BaseModel):
     meet_id: str
 
@@ -225,28 +150,6 @@ class AnalysisResponse(BaseModel):
     result: dict | None = None
     jd_interview_id: str | None = None
     evaluation_id: str | None = None
-
-class MeetingMinutesContextRequest(BaseModel):
-    jd_interview_id: str | None = None
-    candidate_id: str | None = None
-    meet_id: str | None = None
-    query: str | None = None
-    top_k: int = 5
-    match_threshold: float = 0.5
-
-class MeetingMinuteMatch(BaseModel):
-    minute_id: str
-    score: float
-    title: str | None = None
-    summary: str | None = None
-    raw_minutes_preview: str | None = None
-    tags: List[str] | None = None
-    meet_id: str | None = None
-    candidate_id: str | None = None
-    jd_interview_id: str | None = None
-
-class MeetingMinutesContextResponse(BaseModel):
-    matches: List[MeetingMinuteMatch]
 
 class CVRequest(BaseModel):
     filename: str
@@ -284,150 +187,6 @@ class RunStatusResponse(BaseModel):
     message: str = None
     result: dict = None
     error: str = None
-
-@app.post("/analyze", response_model=AnalysisResponse)
-async def trigger_analysis(request: AnalysisRequest = None):
-    """
-    Endpoint que dispara el proceso completo de análisis de candidatos
-    
-    Args:
-        request: Objeto con jd_interview_id opcional para filtrar evaluaciones
-    """
-    try:
-        start_time = datetime.now()
-        
-        # Verificar variables de entorno
-        required_env_vars = ['SUPABASE_URL', 'SUPABASE_KEY', 'OPENAI_API_KEY']
-        missing_vars = [var for var in required_env_vars if not os.getenv(var)]
-        
-        if missing_vars:
-            evaluation_logger.log_error("API", f"Variables de entorno faltantes: {missing_vars}")
-            raise HTTPException(
-                status_code=500, 
-                detail=f"Variables de entorno faltantes: {missing_vars}"
-            )
-        
-        # Log inicio del proceso
-        jd_interview_id = request.jd_interview_id if request else None
-        if jd_interview_id:
-            if not is_valid_uuid(jd_interview_id):
-                evaluation_logger.log_error("API", f"jd_interview_id inválido recibido: {jd_interview_id}")
-                raise HTTPException(status_code=400, detail=f"jd_interview_id inválido: {jd_interview_id}")
-            evaluation_logger.log_task_start("API", f"Iniciando proceso de análisis filtrado por jd_interview_id: {jd_interview_id}")
-        else:
-            evaluation_logger.log_task_start("API", "Iniciando proceso de análisis completo")
-
-        # Preparar variables de evaluación (se insertará al final)
-        evaluation_id = None
-        client_id = None
-                        
-        # Crear y ejecutar crew (filtrado o completo)
-        if jd_interview_id:
-            try:
-                supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
-                
-                jd_response = supabase.table('jd_interviews').select('client_id').eq('id', jd_interview_id).limit(1).execute()
-                if jd_response.data:
-                    jd_record = jd_response.data[0]
-                    client_id = jd_record.get('client_id')
-                    evaluation_logger.log_task_progress("API", f"client_id obtenido para jd_interview {jd_interview_id}: {client_id}")
-                    
-                    if client_id:
-                        client_response = supabase.table('clients').select('email').eq('id', client_id).limit(1).execute()
-                        if client_response.data:
-                            client_email = client_response.data[0].get('email')
-                            evaluation_logger.log_task_progress("API", f"Email del cliente encontrado: {client_email}")
-                            print(f"[API] Email encontrado para jd_interview {jd_interview_id}: {client_email}")
-                        else:
-                            evaluation_logger.log_task_progress("API", f"No se encontró email para client_id: {client_id}")
-                    else:
-                        evaluation_logger.log_task_progress("API", f"El jd_interview {jd_interview_id} no tiene client_id asociado")
-                else:
-                    evaluation_logger.log_task_progress("API", f"No se encontró jd_interview con ID: {jd_interview_id}")
-            except Exception as fetch_error:
-                evaluation_logger.log_error("API", f"Error obteniendo email del cliente: {str(fetch_error)}")
-
-        # Guardar email original si existe
-        original_email = os.getenv("REPORT_TO_EMAIL")
-        email_override_set = False
-        
-        if client_email:
-            os.environ["REPORT_TO_EMAIL"] = client_email
-            email_override_set = True
-            evaluation_logger.log_task_progress("API", f"Email del cliente seteado para envío de reporte: {client_email}")
-
-        try:
-            # Crear y ejecutar crew (filtrado o completo)
-            if jd_interview_id:
-                crew = create_filtered_data_processing_crew(jd_interview_id)
-            else:
-                crew = create_data_processing_crew()
-            
-            print("=" * 80)
-            print("🚀 INICIANDO EJECUCIÓN DEL CREW (Data Processing)")
-            print("=" * 80)
-            
-            result = crew.kickoff()
-            
-            # Calcular tiempo de ejecución
-            end_time = datetime.now()
-            execution_time = str(end_time - start_time)
-            
-            evaluation_logger.log_task_complete("API", f"Análisis completado en {execution_time}")
-            
-            # Procesar resultado
-            result_text = str(result)
-            if hasattr(result, 'raw'):
-                result_text = result.raw
-            
-            # Intentar parsear el resultado como JSON
-            result_dict = None
-            try:
-                result_dict = json.loads(result_text)
-            except json.JSONDecodeError:
-                # Intentar extraer JSON del texto usando regex
-                json_match = re.search(r'\{.*\}', result_text, re.DOTALL)
-                if json_match:
-                    try:
-                        result_dict = json.loads(json_match.group(0))
-                    except json.JSONDecodeError:
-                        result_dict = {"raw_result": result_text[:1000]}
-                else:
-                    result_dict = {"raw_result": result_text[:1000]}
-            
-            # Generar filename con timestamp
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"analysis_results_{timestamp}.json"
-            
-            # Guardar resultado en archivo
-            try:
-                with open(filename, 'w', encoding='utf-8') as f:
-                    json.dump(result_dict, f, indent=2, ensure_ascii=False)
-            except Exception as file_error:
-                evaluation_logger.log_error("API", f"Error guardando resultado en archivo: {str(file_error)}")
-                filename = None
-            
-            return AnalysisResponse(
-                status="success",
-                message="Análisis completado exitosamente",
-                timestamp=start_time.strftime('%Y-%m-%d %H:%M:%S'),
-                execution_time=execution_time,
-                results_file=filename,
-                result=result_dict,
-                jd_interview_id=jd_interview_id
-            )
-        finally:
-            # Restaurar email original si se cambió
-            if email_override_set:
-                if original_email:
-                    os.environ["REPORT_TO_EMAIL"] = original_email
-                else:
-                    os.environ.pop("REPORT_TO_EMAIL", None)
-                evaluation_logger.log_task_progress("API", "Email original restaurado")
-        
-    except Exception as e:
-        evaluation_logger.log_error("API", f"Error en análisis: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error en el análisis: {str(e)}")
 
 @app.post("/read-cv", response_model=CVAnalysisResponse)
 async def read_cv(request: CVRequest):
@@ -837,275 +596,6 @@ async def get_status():
         "service": "Candidate Evaluation API"
     }
 
-def get_access_token():
-    tenant = GRAPH_TENANT_ID
-    url = f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token"
-    data = {
-        'client_id': GRAPH_CLIENT_ID,
-        'client_secret': GRAPH_CLIENT_SECRET,
-        'scope': GRAPH_SCOPE or 'https://graph.microsoft.com/.default',
-        'grant_type': 'client_credentials'
-    }
-    response = requests.post(url, data=data)
-    return response.json()['access_token']
-
-def get_email_details(message_id):
-    """Obtiene los detalles completos del email"""
-    token = get_access_token()
-    
-    # URL para obtener el mensaje específico
-    base = GRAPH_BASE or "https://graph.microsoft.com/v1.0"
-    user_id = OUTLOOK_USER_ID
-    url = f"{base}/users/{user_id}/messages/{message_id}"
-        
-    headers = {
-        'Authorization': f'Bearer {token}',
-        'Content-Type': 'application/json'
-    }
-    
-    response = requests.get(url, headers=headers)
-    return response.json()
-
-@app.post("/webhook")
-async def outlook_webhook(request: Request):
-    # Validación de Microsoft
-    validation_token = request.query_params.get("validationToken")
-    if validation_token:
-        print("✅ Webhook validado por Microsoft")
-        return Response(content=validation_token, status_code=200)
-        # Nota: se quita el return para permitir continuar con el flujo
-    
-    # Notificación real de email
-    try:
-        data = await request.json()
-        
-        _events = len(data.get('value', [])) if isinstance(data, dict) else 0
-        print(f"📧 Notificación recibida - {_events} evento(s)")
-        
-        if 'value' in data:
-            for notification in data['value']:
-                # Extraer ID del mensaje y user_id
-                resource_data = notification.get('resourceData', {})
-                message_id = resource_data.get('id')
-                user_id = resource_data.get('userId')
-                
-                # Si no hay user_id en resourceData, intentar parsear desde resource
-                if not user_id:
-                    resource = notification.get('resource', '')
-                    if resource:
-                        p_user, p_msg = parse_resource_path(resource)
-                        user_id = user_id or p_user
-                        message_id = message_id or p_msg
-                
-                # Si no hay user_id, usar el configurado
-                if not user_id:
-                    user_id = OUTLOOK_USER_ID
-                
-                if not message_id:
-                    print(f"❓ No se pudo extraer message_id desde: {notification}")
-                    continue
-                
-                print(f"Message ID: {message_id}, User ID: {user_id}")
-                
-                # Log conciso del email (mostrar info clave y preview corta)
-                try:
-                    from tools.email_tools import GraphEmailMonitor
-                    _monitor_preview = GraphEmailMonitor()
-                    _msg = _monitor_preview.fetch_message(user_id, message_id)
-                    _subject = _msg.get('subject', '')
-                    _from_data = _msg.get('from', {}) or {}
-                    _from_email = (_from_data.get('emailAddress') or {}).get('address', '')
-                    _from_name = (_from_data.get('emailAddress') or {}).get('name', '')
-                    _sender_str = f"{_from_name} <{_from_email}>" if _from_email else (_from_name or 'Unknown')
-                    _recv = _msg.get('receivedDateTime', '')
-                    _body_text = _monitor_preview.extract_text_from_body(_msg.get('body') or {})
-                    if not _body_text:
-                        _body_text = _msg.get('bodyPreview', '')
-
-                    print(f"📧 Email: '{_subject}' | De: {_sender_str} | Fecha: {_recv}")
-                    preview_len = 300
-                    if _body_text:
-                        _trunc = '…' if len(_body_text) > preview_len else ''
-                        _slice = (_body_text or '')[:preview_len]
-                        print(f"📝 Preview ({min(len(_body_text), preview_len)}): {_slice}{_trunc}")
-                except Exception as _e_log:
-                    print(f"⚠️ No se pudo mostrar contenido: {str(_e_log)}")
-
-                # Procesar el email usando GraphEmailMonitor
-                try:
-                    from tools.email_tools import GraphEmailMonitor
-                    monitor = GraphEmailMonitor()
-                    result = monitor.process_email_from_graph(message_id, user_id)
-                    
-                    if result:
-                        print(f"✅ Email procesado exitosamente: {result.get('subject', '')}")
-                    else:
-                        print(f"⚠️ Email no procesado (no es -JD o error)")
-                        
-                except Exception as e:
-                    print(f"❌ Error procesando email: {str(e)}")
-                    evaluation_logger.log_error("Webhook", f"Error procesando email {message_id}: {str(e)}")
-                
-        return {"status": "ok"}
-        
-    except Exception as e:
-        print(f"❌ Error: {e}")
-        evaluation_logger.log_error("Webhook", f"Error en webhook: {str(e)}")
-        return {"status": "error"}
-
-def _build_emotion_sentiment_summary(emotion_analysis: dict | None) -> dict | None:
-    """
-    Construye un pequeño resumen textual de emociones a partir de emotion_analysis
-    proveniente de la tabla conversations.emotion_analysis (Prosody / Burst).
-    """
-    if not isinstance(emotion_analysis, dict):
-        return None
-
-    prosody = emotion_analysis.get("prosody") or {}
-    burst = emotion_analysis.get("burst") or {}
-
-    prosody_summary = prosody.get("summary") or []
-    burst_summary = burst.get("summary") or []
-
-    def summarize(label: str, items: list[dict]) -> str:
-        if not items:
-            return f"No se detectaron emociones predominantes en {label}."
-
-        # Ordenar por averageScore descendente y tomar top 3
-        ordered = sorted(
-            items,
-            key=lambda x: x.get("averageScore", 0) or 0,
-            reverse=True,
-        )[:3]
-
-        def display_name(item: dict) -> str:
-            return item.get("nameTranslated") or item.get("name") or "N/A"
-
-        names = [display_name(it) for it in ordered]
-        top_score = ordered[0].get("averageScore", 0) or 0
-
-        if top_score >= 0.6:
-            intensity = "muy alta"
-        elif top_score >= 0.3:
-            intensity = "moderada"
-        else:
-            intensity = "baja"
-
-        if len(names) == 1:
-            names_text = names[0]
-        elif len(names) == 2:
-            names_text = f"{names[0]} y {names[1]}"
-        else:
-            names_text = f"{', '.join(names[:-1])} y {names[-1]}"
-
-        return f"En {label} predominaron {names_text}, con una intensidad emocional {intensity}."
-
-    prosody_text = summarize("la voz continua (prosody)", prosody_summary)
-    burst_text = summarize("los vocal bursts (burst)", burst_summary)
-
-    return {
-        "raw_emotion_analysis": emotion_analysis,
-        "prosody_summary_text": prosody_text,
-        "burst_summary_text": burst_text,
-    }
-
-
-@app.post("/meeting-minutes-context", response_model=MeetingMinutesContextResponse)
-async def meeting_minutes_context(request: MeetingMinutesContextRequest):
-    """
-    Endpoint para que un agente externo (por ejemplo ElevenLabs) obtenga contexto
-    basado en minutas de entrevistas anteriores, usando búsqueda vectorial.
-
-    - Usa la tabla lógica `knowledge_chunks` con entity_type = "meeting_minute"
-      (las minutas se indexan allí automáticamente al guardarse).
-    - Opcionalmente filtra por jd_interview_id, candidate_id o meet_id.
-    """
-    try:
-        # Usar query del request o un texto genérico por defecto
-        query_text = (request.query or "").strip()
-        if not query_text:
-            query_text = "contexto general de esta entrevista para buscar minutas anteriores similares"
-
-        # Buscar chunks similares de tipo "meeting_minute"
-        chunks = search_similar_chunks(
-            query_text=query_text,
-            match_threshold=request.match_threshold,
-            match_count=request.top_k,
-            entity_type_filter="meeting_minute",
-        )
-
-        matches: List[MeetingMinuteMatch] = []
-
-        for ch in chunks or []:
-            metadata = ch.get("metadata") or {}
-
-            # Filtros opcionales por IDs específicos
-            if request.jd_interview_id and metadata.get("jd_interview_id") != request.jd_interview_id:
-                continue
-            if request.candidate_id and metadata.get("candidate_id") != request.candidate_id:
-                continue
-            if request.meet_id and metadata.get("meet_id") != request.meet_id:
-                continue
-
-            minute_id = metadata.get("meeting_minute_id") or metadata.get("minute_id") or ch.get("entity_id")
-            if not minute_id:
-                continue
-
-            match = MeetingMinuteMatch(
-                minute_id=str(minute_id),
-                score=float(ch.get("similarity") or 0.0),
-                title=metadata.get("title"),
-                summary=metadata.get("summary") or ch.get("content"),
-                raw_minutes_preview=metadata.get("raw_minutes_preview"),
-                tags=metadata.get("tags"),
-                meet_id=metadata.get("meet_id"),
-                candidate_id=metadata.get("candidate_id"),
-                jd_interview_id=metadata.get("jd_interview_id"),
-            )
-            matches.append(match)
-
-        # Limitar a top_k por si el filtrado redujo o mantuvo la lista
-        matches = sorted(matches, key=lambda m: m.score, reverse=True)[: request.top_k]
-
-        return MeetingMinutesContextResponse(matches=matches)
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        evaluation_logger.log_error("API", f"Error en meeting_minutes_context: {str(e)}")
-        raise HTTPException(status_code=500, detail="Error buscando minutas similares")
-
-
-@app.get(
-    "/meeting-minutes-context/{jd_interview_id}/{candidate_id}",
-    response_model=MeetingMinutesContextResponse,
-)
-async def meeting_minutes_context_path(
-    jd_interview_id: str,
-    candidate_id: str,
-    meet_id: str | None = None,
-    query: str | None = Query(None, description="Texto base para buscar minutas similares (opcional; si viene vacío se usa un texto genérico)"),
-    top_k: int = 5,
-    match_threshold: float = 0.5,
-):
-    """
-    Variante del endpoint de contexto de minutas que recibe los identificadores
-    por path params para integraciones como ElevenLabs.
-
-    URL de ejemplo:
-    /meeting-minutes-context/{jd_interview_id}/{candidate_id}?query=...&top_k=5&match_threshold=0.5
-    """
-    req = MeetingMinutesContextRequest(
-        jd_interview_id=jd_interview_id,
-        candidate_id=candidate_id,
-        meet_id=meet_id,
-        query=query,
-        top_k=top_k,
-        match_threshold=match_threshold,
-    )
-    return await meeting_minutes_context(req)
-
-
 @app.post("/evaluate-meet", response_model=AnalysisResponse)
 async def evaluate_single_meet(request: SingleMeetRequest):
     """
@@ -1115,18 +605,9 @@ async def evaluate_single_meet(request: SingleMeetRequest):
     Args:
         request: Objeto con meet_id del meet a evaluar
     """
-    tracker = None
     try:
         meet_id = request.meet_id
         evaluation_logger.log_task_start("API", f"Iniciando evaluación de meet: {meet_id}")
-        
-        # Inicializar tracker de tokens
-        tracker = TokenTracker(log_dir="logs/token_tracking")
-        run_id = tracker.start_run(
-            crew_name="SingleMeetEvaluationCrew",
-            meta={"meet_id": meet_id}
-        )
-        print(f"▶ RunID: {run_id}")
         
         start_time = datetime.now()
         
@@ -1144,19 +625,6 @@ async def evaluate_single_meet(request: SingleMeetRequest):
         print("Cargando datos mockados desde utils/data.json")
         #result = json.load(open("utils/data.json", "r", encoding="utf-8"))
         #print("result: ", result)
-        
-        #Descomentar para trackeo de tokens del crew
-        # Registrar uso de tokens del crew
-        tracker.add_crew_result(
-            result=result,
-            step_name="crew.kickoff",
-            agent=None,
-            task=None,
-            extra={
-                "usage_metrics": getattr(crew, "usage_metrics", None),
-                "result_meta": getattr(result, "raw", None) and {"has_raw": True}
-            }
-        )
         
         end_time = datetime.now()
         execution_time = end_time - start_time
@@ -1529,8 +997,7 @@ async def evaluate_single_meet(request: SingleMeetRequest):
                             #     headers={'Content-Type': 'application/json'},
                             #     timeout=30
                             # )
-                            
-                            response.raise_for_status()
+                            #response.raise_for_status()
                             email_sent = True
                             evaluation_logger.log_task_complete("Envío Email Match", f"Email enviado exitosamente a {client_email}")
                         else:
@@ -1542,14 +1009,6 @@ async def evaluate_single_meet(request: SingleMeetRequest):
                 evaluation_logger.log_error("Envío Email Match", f"Error enviando email de match: {str(email_error)}")
                 # No fallar la respuesta por error en el email
         
-        # Finalizar tracking de tokens
-        if tracker:
-            try:
-                out_path = tracker.finish_run()
-                print(f"✅ Token tracking completado. Log guardado en: {out_path}")
-            except Exception as tracker_error:
-                evaluation_logger.log_error("API", f"Error finalizando token tracker: {str(tracker_error)}")
-        
         return AnalysisResponse(
             status="success",
             message=f"Evaluación del meet {meet_id} completada exitosamente" + (f" - Email enviado" if email_sent else ""),
@@ -1560,83 +1019,8 @@ async def evaluate_single_meet(request: SingleMeetRequest):
         
     except Exception as e:
         evaluation_logger.log_error("API", f"Error en evaluación de meet: {str(e)}")
-        # Finalizar tracking incluso si hay error
-        if tracker:
-            try:
-                tracker.finish_run()
-            except:
-                pass
         raise HTTPException(status_code=500, detail=f"Error en la evaluación: {str(e)}")
-    
-    
-# ====== Procesamiento ======
 
-async def handle_outlook_notifications(payload: dict):
-    """
-    Procesa cada notificación usando GraphEmailMonitor.
-    - Verifica clientState
-    - Maneja lifecycle notifications (si las configuraste)
-    - Obtiene userId y messageId
-    - Procesa el email usando GraphEmailMonitor
-    """
-    try:
-        from tools.email_tools import GraphEmailMonitor
-        monitor = GraphEmailMonitor()
-        
-        values = payload.get("value", [])
-        for n in values:
-            # Lifecycle notifications (opcional)
-            # Ej: {"lifecycleEvent": "reauthorizationRequired"} etc.
-            lifecycle_event = n.get("lifecycleEvent")
-            if lifecycle_event:
-                print(f"♻️ Lifecycle event: {lifecycle_event} (subscriptionId={n.get('subscriptionId')})")
-                # TODO: manejar renovación/reauthorization si hace falta
-                continue
-
-            # Seguridad: validar clientState si lo usaste al crear la suscripción
-            if GRAPH_CLIENT_STATE and n.get("clientState") and n["clientState"] != GRAPH_CLIENT_STATE:
-                print("⚠️ clientState inválido; ignorando notificación")
-                continue
-
-            change_type = n.get("changeType")  # created, updated, deleted
-            resource = n.get("resource", "")
-            resource_data = n.get("resourceData", {})
-
-            # Priorizar resourceData.id si estás usando includeResourceData=false (Graph igual suele mandar id)
-            user_id = resource_data.get("userId")
-            message_id = resource_data.get("id")
-
-            if not user_id or not message_id:
-                # Intentar parsear desde 'resource'
-                p_user, p_msg = parse_resource_path(resource)
-                user_id = user_id or p_user
-                message_id = message_id or p_msg
-
-            # Si no hay user_id, usar el configurado
-            if not user_id:
-                user_id = OUTLOOK_USER_ID
-
-            print(f"🔎 changeType={change_type} userId={user_id} messageId={message_id}")
-
-            # Si no hay ids suficientes, log y continuar
-            if not user_id or not message_id:
-                print(f"❓ No se pudo extraer userId/messageId desde: resourceData={resource_data} resource='{resource}'")
-                continue
-
-            # Procesar el email usando GraphEmailMonitor
-            try:
-                result = monitor.process_email_from_graph(message_id, user_id)
-                if result:
-                    print(f"✅ Email procesado exitosamente: {result.get('subject', '')}")
-                else:
-                    print(f"⚠️ Email no procesado (no es -JD o error)")
-            except Exception as ex:
-                print(f"❌ Error procesando mensaje {message_id}: {str(ex)}")
-                evaluation_logger.log_error("Handle Notifications", f"Error procesando mensaje {message_id}: {str(ex)}")
-
-    except Exception as e:
-        print(f"❌ Error procesando notificaciones: {str(e)}")
-        evaluation_logger.log_error("Handle Notifications", f"Error procesando notificaciones: {str(e)}")
 
 class CreateAgentRequest(BaseModel):
     jd_interview_id: str
@@ -1652,11 +1036,6 @@ class CreateAgentResponse(BaseModel):
     agent_id: str | None = None
     agent_name: str | None = None
 
-class TokenEstimationResponse(BaseModel):
-    status: str
-    message: str
-    meet_id: str
-
 class ChatbotRequest(BaseModel):
     message: str
     conversation_history: Optional[List[Dict[str, str]]] = []
@@ -1665,12 +1044,6 @@ class ChatbotResponse(BaseModel):
     response: str
     sources: Optional[List[Dict[str, Any]]] = []
     model: Optional[str] = None
-    estimated_input_tokens: Optional[int] = None
-    estimated_completion_tokens: Optional[int] = None
-    estimated_total_tokens: Optional[int] = None
-    estimated_input_cost_usd: Optional[float] = None
-    estimated_completion_cost_usd: Optional[float] = None
-    estimated_total_cost_usd: Optional[float] = None
     timestamp: Optional[str] = None
 
 class CandidateInfoResponse(BaseModel):
@@ -1682,218 +1055,8 @@ class CandidateInfoResponse(BaseModel):
     related_meets: Optional[List[Dict[str, Any]]] = None
     related_evaluations: Optional[List[Dict[str, Any]]] = None
 
-@app.post("/estimate-meet-tokens", response_model=TokenEstimationResponse)
-async def estimate_meet_tokens(request: SingleMeetRequest):
-    """
-    Endpoint que estima el consumo de tokens antes de ejecutar el crew de evaluación de un meet
-    
-    Args:
-        request: Objeto con meet_id del meet a evaluar
-        
-    Returns:
-        Estimación de tokens y costo aproximado
-    """
-    try:
-        meet_id = request.meet_id
-        evaluation_logger.log_task_start("API", f"Estimando tokens para meet: {meet_id}")
-        
-        # Obtener datos del meet para estimar tokens
-        func_to_call = None
-        if hasattr(get_meet_evaluation_data, '__wrapped__'):
-            func_to_call = get_meet_evaluation_data.__wrapped__
-        elif hasattr(get_meet_evaluation_data, 'func'):
-            func_to_call = get_meet_evaluation_data.func
-        elif hasattr(get_meet_evaluation_data, '_func'):
-            func_to_call = get_meet_evaluation_data._func
-        elif callable(get_meet_evaluation_data) and not hasattr(get_meet_evaluation_data, 'name'):
-            func_to_call = get_meet_evaluation_data
-        
-        if not func_to_call:
-            raise HTTPException(status_code=500, detail="No se pudo acceder a la función get_meet_evaluation_data")
-        
-        meet_data_json = func_to_call(meet_id)
-        meet_data = json.loads(meet_data_json) if isinstance(meet_data_json, str) else meet_data_json
-        
-        # Obtener información del agente y tareas
-        evaluator_agent = create_single_meet_evaluator_agent()
-        extraction_task = create_single_meet_extraction_task(evaluator_agent, meet_id)
-        evaluation_task = create_single_meet_evaluation_task(evaluator_agent, extraction_task)
-
-        model = "gpt-5-nano"
-        # ===== TAREA 1: EXTRACTION TASK =====
-        # System message con backstory del agente
-        system_message = {
-            "role": "system",
-            "content": f"""Eres un {evaluator_agent.role}.
-            
-{evaluator_agent.backstory}
-
-Tu objetivo: {evaluator_agent.goal}"""
-        }
-        
-        # User message para extraction_task
-        extraction_user_message = {
-            "role": "user",
-            "content": extraction_task.description
-        }
-        
-        extraction_messages = [system_message, extraction_user_message]
-        extraction_input_tokens = estimate_task_tokens(extraction_messages, model)
-        
-        # Completion de extraction_task = los datos del meet (que ya tenemos)
-        extraction_output = json.dumps(meet_data, indent=2, ensure_ascii=False) if meet_data else ""
-        extraction_completion_tokens = estimate_completion_tokens(extraction_output, model)
-        
-        # ===== DESGLOSE DEL CONTEXTO =====
-        context_breakdown = breakdown_context_tokens(meet_data, model)
-        
-        # Calcular tokens de las descripciones de las tareas y backstory
-        try:
-            enc = tiktoken.encoding_for_model(model)
-        except KeyError:
-            enc = tiktoken.get_encoding("cl100k_base")
-        
-        # Tokens del backstory (compartido en ambas tareas)
-        backstory_tokens = len(enc.encode(system_message["content"]))
-        
-        # Tokens de descripción de cada tarea
-        extraction_task_description_tokens = len(enc.encode(extraction_task.description))
-        evaluation_task_description_tokens = len(enc.encode(evaluation_task.description))
-        
-        # Desglose del completion de extraction_task (los datos del meet)
-        extraction_completion_breakdown = breakdown_context_tokens(meet_data, model)
-        
-        # ===== TAREA 2: EVALUATION TASK =====
-        # User message con descripción de la tarea de evaluación + contexto (resultado de extraction_task)
-        evaluation_user_message_content = f"""{evaluation_task.description}
-
-## CONTEXTO - DATOS DEL MEET (resultado de la tarea anterior):
-{extraction_output}
-
-## SALIDA ESPERADA:
-{evaluation_task.expected_output}"""
-        
-        evaluation_user_message = {
-            "role": "user",
-            "content": evaluation_user_message_content
-        }
-        
-        evaluation_messages = [system_message, evaluation_user_message]
-        evaluation_input_tokens = estimate_task_tokens(evaluation_messages, model)
-        
-        # Completion de evaluation_task = JSON de evaluación completo
-        evaluation_completion_tokens = estimate_completion_tokens(evaluation_task.expected_output, model)
-        
-        # Desglose del completion de evaluation_task (basado en expected_output)
-        # El expected_output es un JSON grande con análisis completo
-        evaluation_completion_text = evaluation_task.expected_output
-        evaluation_completion_breakdown = {
-            "total": evaluation_completion_tokens,
-            "estimated_soft_skills": int(evaluation_completion_tokens * 0.30),  # ~30% para análisis de habilidades blandas
-            "estimated_technical": int(evaluation_completion_tokens * 0.25),  # ~25% para análisis técnico
-            "estimated_jd_analysis": int(evaluation_completion_tokens * 0.15),  # ~15% para análisis de JD
-            "estimated_match_evaluation": int(evaluation_completion_tokens * 0.20),  # ~20% para evaluación de match
-            "estimated_structure": int(evaluation_completion_tokens * 0.10),  # ~10% para estructura JSON
-        }
-        
-        # ===== TOTALES =====
-        total_input_tokens = extraction_input_tokens + evaluation_input_tokens
-        total_completion_tokens = extraction_completion_tokens + evaluation_completion_tokens
-        
-        # Calcular costos separados
-        cost_breakdown = estimate_cost(total_input_tokens, total_completion_tokens, model)
-        
-        # Mostrar estimación detallada
-        print(f"\n{'='*60}")
-        print(f"📊 ESTIMACIÓN DE TOKENS PARA MEET: {meet_id}")
-        print(f"{'='*60}")
-        print(f"Modelo: {model}\n")
-        
-        print(f"📋 TAREA 1: EXTRACTION")
-        print(f"  Input tokens: {extraction_input_tokens:,}")
-        print(f"  Completion tokens: {extraction_completion_tokens:,}")
-        print(f"  Subtotal: {extraction_input_tokens + extraction_completion_tokens:,} tokens")
-        
-        print(f"\n  🔍 Desglose Input (Tarea 1):")
-        print(f"    Backstory del agente: {backstory_tokens:,} tokens (~{backstory_tokens/extraction_input_tokens*100:.1f}%)")
-        print(f"    Descripción de la tarea: {extraction_task_description_tokens:,} tokens (~{extraction_task_description_tokens/extraction_input_tokens*100:.1f}%)")
-        
-        print(f"\n  🔍 Desglose Completion (Tarea 1):")
-        print(f"    Conversation data: {extraction_completion_breakdown['conversation_data']:,} tokens (~{extraction_completion_breakdown['conversation_data']/extraction_completion_tokens*100:.1f}%)")
-        print(f"    Job description: {extraction_completion_breakdown['job_description']:,} tokens (~{extraction_completion_breakdown['job_description']/extraction_completion_tokens*100:.1f}%)")
-        print(f"    Tech stack: {extraction_completion_breakdown['tech_stack']:,} tokens (~{extraction_completion_breakdown['tech_stack']/extraction_completion_tokens*100:.1f}%)")
-        print(f"    Resto del JSON: {extraction_completion_breakdown['resto_json']:,} tokens (~{extraction_completion_breakdown['resto_json']/extraction_completion_tokens*100:.1f}%)")
-        print(f"    Total datos: {extraction_completion_breakdown['total_context']:,} tokens\n")
-        
-        print(f"📋 TAREA 2: EVALUATION")
-        print(f"  Input tokens: {evaluation_input_tokens:,}")
-        print(f"  Completion tokens: {evaluation_completion_tokens:,}")
-        print(f"  Subtotal: {evaluation_input_tokens + evaluation_completion_tokens:,} tokens")
-        
-        print(f"\n  🔍 Desglose Input (Tarea 2):")
-        print(f"    Backstory del agente: {backstory_tokens:,} tokens (~{backstory_tokens/evaluation_input_tokens*100:.1f}%)")
-        print(f"    Descripción de la tarea: {evaluation_task_description_tokens:,} tokens (~{evaluation_task_description_tokens/evaluation_input_tokens*100:.1f}%)")
-        print(f"    Conversation data: {context_breakdown['conversation_data']:,} tokens (~{context_breakdown['conversation_data']/evaluation_input_tokens*100:.1f}%)")
-        print(f"    Job description: {context_breakdown['job_description']:,} tokens (~{context_breakdown['job_description']/evaluation_input_tokens*100:.1f}%)")
-        print(f"    Tech stack: {context_breakdown['tech_stack']:,} tokens (~{context_breakdown['tech_stack']/evaluation_input_tokens*100:.1f}%)")
-        print(f"    Resto del JSON (estructura/metadatos): {context_breakdown['resto_json']:,} tokens (~{context_breakdown['resto_json']/evaluation_input_tokens*100:.1f}%)")
-        print(f"    Total contexto: {context_breakdown['total_context']:,} tokens (~{context_breakdown['total_context']/evaluation_input_tokens*100:.1f}%)")
-        
-        print(f"\n  🔍 Desglose Completion (Tarea 2):")
-        print(f"    Análisis habilidades blandas: ~{evaluation_completion_breakdown['estimated_soft_skills']:,} tokens (~{evaluation_completion_breakdown['estimated_soft_skills']/evaluation_completion_tokens*100:.1f}%)")
-        print(f"    Análisis técnico: ~{evaluation_completion_breakdown['estimated_technical']:,} tokens (~{evaluation_completion_breakdown['estimated_technical']/evaluation_completion_tokens*100:.1f}%)")
-        print(f"    Análisis JD: ~{evaluation_completion_breakdown['estimated_jd_analysis']:,} tokens (~{evaluation_completion_breakdown['estimated_jd_analysis']/evaluation_completion_tokens*100:.1f}%)")
-        print(f"    Evaluación de match: ~{evaluation_completion_breakdown['estimated_match_evaluation']:,} tokens (~{evaluation_completion_breakdown['estimated_match_evaluation']/evaluation_completion_tokens*100:.1f}%)")
-        print(f"    Estructura JSON: ~{evaluation_completion_breakdown['estimated_structure']:,} tokens (~{evaluation_completion_breakdown['estimated_structure']/evaluation_completion_tokens*100:.1f}%)")
-        print(f"    Total completion: {evaluation_completion_tokens:,} tokens\n")
-        
-        print(f"📊 TOTALES")
-        print(f"  Input tokens totales: {total_input_tokens:,}")
-        print(f"  Completion tokens totales: {total_completion_tokens:,}")
-        print(f"  Total tokens: {cost_breakdown['total_tokens']:,}\n")
-        
-        print(f"💰 COSTOS")
-        print(f"  Costo Input: ${cost_breakdown['input_cost']:.4f} USD")
-        print(f"  Costo Completion: ${cost_breakdown['output_cost']:.4f} USD")
-        print(f"  Costo Total: ${cost_breakdown['total_cost']:.4f} USD")
-        print(f"{'='*60}\n")
-        
-        evaluation_logger.log_task_complete(
-            "API", 
-            f"Estimación completada: {cost_breakdown['total_tokens']:,} tokens totales "
-            f"({total_input_tokens:,} input + {total_completion_tokens:,} completion) | "
-            f"${cost_breakdown['total_cost']:.4f} USD"
-        )
-        
-        return TokenEstimationResponse(
-            status="success",
-            message=f"Estimación de tokens calculada exitosamente",
-            meet_id=meet_id,
-            model=model,
-            estimated_input_tokens=total_input_tokens,
-            estimated_completion_tokens=total_completion_tokens,
-            estimated_total_tokens=cost_breakdown['total_tokens'],
-            estimated_input_cost_usd=cost_breakdown['input_cost'],
-            estimated_completion_cost_usd=cost_breakdown['output_cost'],
-            estimated_total_cost_usd=cost_breakdown['total_cost'],
-            timestamp=datetime.now().isoformat()
-        )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        error_msg = f"Error al estimar tokens: {str(e)}"
-        print(f"❌ {error_msg}")
-        evaluation_logger.log_error("API", error_msg)
-        raise HTTPException(status_code=500, detail=error_msg)
-
-
-@app.patch("/update-elevenlabs-agent")
-async def update_elevenlabs_agent_endpoint(request: UpdateAgentRequest):
-    """
-    Endpoint que actualiza SOLO el prompt de un agente de ElevenLabs
-    basado en el jd_interview_id (usa la JD actualizada).
-    """
+def _update_elevenlabs_agent_impl(request: UpdateAgentRequest) -> dict:
+    """Lógica síncrona (Supabase / ElevenLabs / indexación); run_in_threadpool desde el handler async."""
     try:
         start_time = datetime.now()
         jd_interview_id = request.jd_interview_id
@@ -1912,7 +1075,6 @@ async def update_elevenlabs_agent_endpoint(request: UpdateAgentRequest):
 
         supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
 
-        # 1. Obtener datos del jd_interview (incluye JD y agent_id)
         jd_response = supabase.table("jd_interviews").select("*").eq("id", jd_interview_id).limit(1).execute()
         if not jd_response.data or len(jd_response.data) == 0:
             error_msg = f"No se encontró jd_interview con ID: {jd_interview_id}"
@@ -1940,7 +1102,6 @@ async def update_elevenlabs_agent_endpoint(request: UpdateAgentRequest):
             evaluation_logger.log_error("API", error_msg)
             raise HTTPException(status_code=400, detail=error_msg)
 
-        # 2. Obtener email del cliente (para generar prompt coherente)
         func_to_call = None
         if hasattr(get_client_email, "__wrapped__"):
             func_to_call = get_client_email.__wrapped__
@@ -1967,7 +1128,6 @@ async def update_elevenlabs_agent_endpoint(request: UpdateAgentRequest):
             evaluation_logger.log_error("API", error_msg)
             raise HTTPException(status_code=400, detail=error_msg)
 
-        # 3. Generar nuevo prompt base a partir de la JD actualizada
         prompt_data = generate_elevenlabs_prompt_from_jd(
             interview_name=interview_name,
             job_description=job_description,
@@ -1979,7 +1139,6 @@ async def update_elevenlabs_agent_endpoint(request: UpdateAgentRequest):
             evaluation_logger.log_error("API", error_msg)
             raise HTTPException(status_code=500, detail=error_msg)
 
-        # 3b. Asegurar que se mantenga la misma estructura obligatoria de entrevista
         estructura_obligatoria = """
 
 **ESTRUCTURA OBLIGATORIA DE LA ENTREVISTA:**
@@ -2009,7 +1168,6 @@ Debes realizar EXACTAMENTE las siguientes preguntas en este orden:
 
         full_prompt_text = generated_prompt + estructura_obligatoria
 
-        # 4. Actualizar el agente en ElevenLabs usando solo el prompt
         update_result = update_elevenlabs_agent_prompt(agent_id=str(agent_id), prompt_text=full_prompt_text)
         if not update_result:
             error_msg = "No se pudo actualizar el agente de ElevenLabs"
@@ -2021,14 +1179,12 @@ Debes realizar EXACTAMENTE las siguientes preguntas en este orden:
             "Actualizar Agente ElevenLabs",
             f"Agente {agent_id} actualizado exitosamente en {execution_time}"
         )
-        
-        # Indexar JD Interview actualizada en knowledge base (indexación incremental)
+
         try:
             from tools.vector_tools import index_jd_interview
             index_jd_interview(jd_data)
             evaluation_logger.log_task_progress("Actualizar Agente ElevenLabs", f"JD Interview re-indexada en knowledge base: {jd_interview_id}")
         except Exception as index_error:
-            # No fallar si falla la indexación
             evaluation_logger.log_error("Actualizar Agente ElevenLabs", f"Error re-indexando JD Interview: {str(index_error)}")
 
         return {
@@ -2049,18 +1205,17 @@ Debes realizar EXACTAMENTE las siguientes preguntas en este orden:
         evaluation_logger.log_error("API", f"Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=error_msg)
 
-@app.post("/create-elevenlabs-agent", response_model=CreateAgentResponse)
-async def create_elevenlabs_agent_endpoint(request: CreateAgentRequest):
+
+@app.patch("/update-elevenlabs-agent")
+async def update_elevenlabs_agent_endpoint(request: UpdateAgentRequest):
     """
-    Endpoint que crea un agente de ElevenLabs basado en un jd_interview_id
-    y actualiza el registro en jd_interviews con el agent_id generado.
-    
-    Args:
-        request: Objeto con jd_interview_id del registro a procesar
-        
-    Returns:
-        Respuesta con el estado de la operación y el agent_id creado
+    Endpoint que actualiza SOLO el prompt de un agente de ElevenLabs
+    basado en el jd_interview_id (usa la JD actualizada).
     """
+    return await run_in_threadpool(_update_elevenlabs_agent_impl, request)
+
+def _create_elevenlabs_agent_impl(request: CreateAgentRequest) -> CreateAgentResponse:
+    """Lógica síncrona (Supabase / ElevenLabs / indexación); run_in_threadpool desde el handler async."""
     try:
         start_time = datetime.now()
         jd_interview_id = request.jd_interview_id
@@ -2242,18 +1397,24 @@ async def create_elevenlabs_agent_endpoint(request: CreateAgentRequest):
         evaluation_logger.log_error("API", f"Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=error_msg)
 
-@app.post("/chatbot", response_model=ChatbotResponse)
-async def chatbot_endpoint(request: ChatbotRequest):
+
+@app.post("/create-elevenlabs-agent", response_model=CreateAgentResponse)
+async def create_elevenlabs_agent_endpoint(request: CreateAgentRequest):
     """
-    Endpoint del chatbot que usa búsqueda vectorial (RAG) para responder preguntas
-    sobre candidatos, entrevistas y el sistema.
-    
+    Endpoint que crea un agente de ElevenLabs basado en un jd_interview_id
+    y actualiza el registro en jd_interviews con el agent_id generado.
+
     Args:
-        request: Objeto con el mensaje del usuario y el historial de conversación
-        
+        request: Objeto con jd_interview_id del registro a procesar
+
     Returns:
-        Respuesta del chatbot con contexto relevante de la base de datos
+        Respuesta con el estado de la operación y el agent_id creado
     """
+    return await run_in_threadpool(_create_elevenlabs_agent_impl, request)
+
+
+def _chatbot_impl(request: ChatbotRequest) -> ChatbotResponse:
+    """Lógica síncrona (Supabase / búsqueda vectorial / OpenAI); run_in_threadpool desde el handler async."""
     try:
         start_time = datetime.now()
         message = request.message
@@ -2403,8 +1564,6 @@ INSTRUCCIONES:
         
         bot_response = response.choices[0].message.content
         
-        # Extraer información de tokens y costos de la respuesta de OpenAI
-        usage = response.usage
         model_used = response.model
         
         execution_time = str(datetime.now() - start_time)
@@ -2414,12 +1573,6 @@ INSTRUCCIONES:
             response=bot_response,
             sources=sources[:3] if sources else [],  # Máximo 3 fuentes
             model=model_used,
-            estimated_input_tokens=usage.prompt_tokens if usage else None,
-            estimated_completion_tokens=usage.completion_tokens if usage else None,
-            estimated_total_tokens=usage.total_tokens if usage else None,
-            estimated_input_cost_usd=None,  # Opcional, se puede calcular después
-            estimated_completion_cost_usd=None,  # Opcional, se puede calcular después
-            estimated_total_cost_usd=None,  # Opcional, se puede calcular después
             timestamp=datetime.now().isoformat()
         )
         
@@ -2433,22 +1586,24 @@ INSTRUCCIONES:
         evaluation_logger.log_error("Chatbot", f"Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=error_msg)
 
-@app.get("/get-candidate-info/{candidate_id}", response_model=CandidateInfoResponse)
-async def get_candidate_info(
-    candidate_id: str,
-    include_related: bool = True
-):
+
+@app.post("/chatbot", response_model=ChatbotResponse)
+async def chatbot_endpoint(request: ChatbotRequest):
     """
-    Endpoint para obtener información de candidatos por ID (path parameter).
-    Diseñado para ser usado como herramienta por ElevenLabs Agents.
-    
+    Endpoint del chatbot que usa búsqueda vectorial (RAG) para responder preguntas
+    sobre candidatos, entrevistas y el sistema.
+
     Args:
-        candidate_id: ID único del candidato (UUID) - path parameter
-        include_related: Si True, incluye información de meets y evaluaciones relacionadas
-        
+        request: Objeto con el mensaje del usuario y el historial de conversación
+
     Returns:
-        Información del candidato con datos completos
+        Respuesta del chatbot con contexto relevante de la base de datos
     """
+    return await run_in_threadpool(_chatbot_impl, request)
+
+
+def _get_candidate_info_impl(candidate_id: str, include_related: bool) -> CandidateInfoResponse:
+    """Lógica síncrona (Supabase); run_in_threadpool desde el handler async."""
     try:
         start_time = datetime.now()
         evaluation_logger.log_task_start("Get Candidate Info", f"Buscando candidato por ID: {candidate_id}")
@@ -2523,6 +1678,26 @@ async def get_candidate_info(
         import traceback
         evaluation_logger.log_error("Get Candidate Info", f"Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=error_msg)
+
+
+@app.get("/get-candidate-info/{candidate_id}", response_model=CandidateInfoResponse)
+async def get_candidate_info(
+    candidate_id: str,
+    include_related: bool = True
+):
+    """
+    Endpoint para obtener información de candidatos por ID (path parameter).
+    Diseñado para ser usado como herramienta por ElevenLabs Agents.
+
+    Args:
+        candidate_id: ID único del candidato (UUID) - path parameter
+        include_related: Si True, incluye información de meets y evaluaciones relacionadas
+
+    Returns:
+        Información del candidato con datos completos
+    """
+    return await run_in_threadpool(_get_candidate_info_impl, candidate_id, include_related)
+
 
 if __name__ == "__main__":
     import uvicorn
