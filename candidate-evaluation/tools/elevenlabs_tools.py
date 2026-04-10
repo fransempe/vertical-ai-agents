@@ -255,7 +255,10 @@ Debes realizar EXACTAMENTE las siguientes preguntas en este orden:
 - NO hagas más de 1 pregunta sobre la experiencia del candidato 
 - NO hagas más de 1 pregunta de habilidades blandas y que sea breve
 - NO hagas más de 3 preguntas técnicas
-- Al finalizar las 5 preguntas, agradece al candidato y cierra la entrevista"""
+- Al finalizar las 5 preguntas, agrega SIEMPRE una pregunta final de cierre: "¿Tenés alguna pregunta o alguna duda?"
+- Hacia el final de la entrevista, incentiva activamente al candidato a realizar preguntas sobre el proceso, el rol o el cliente
+- Antes de cerrar la entrevista, indicá explícitamente: "Para finalizar la entrevista con éxito, hacé click en Finalizar y luego cierra la ventana del navegador"
+- Después de esa indicación, agradece al candidato y cierra la entrevista"""
         
         # Concatenar el prompt generado con la estructura obligatoria
         prompt_text = generated_prompt + estructura_obligatoria

@@ -1164,7 +1164,10 @@ Debes realizar EXACTAMENTE las siguientes preguntas en este orden:
 - Responde en español de manera clara y concisa
 - NO hagas más de 2 preguntas de habilidades blandas
 - NO hagas más de 5 preguntas técnicas
-- Al finalizar las 7 preguntas, agradece al candidato y cierra la entrevista"""
+- Al finalizar las 7 preguntas técnicas/soft, agrega SIEMPRE una pregunta final de cierre: "¿Tenés alguna pregunta o alguna duda?"
+- Hacia el final de la entrevista, incentiva activamente al candidato a realizar preguntas sobre el proceso, el rol o el cliente
+- Antes de cerrar la entrevista, indicá explícitamente: "Para finalizar la entrevista con éxito, hacé click en Finalizar y luego cierra la ventana del navegador"
+- Después de esa indicación, agradece al candidato y cierra la entrevista"""
 
         full_prompt_text = generated_prompt + estructura_obligatoria
 
