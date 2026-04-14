@@ -2,22 +2,22 @@
 """
 Agente independiente para análisis de CVs desde S3
 """
+
 import os
+
 from crewai import Agent
+from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
+
 from tools.cv_tools import download_cv_from_s3, extract_candidate_data
 from tools.supabase_tools import create_candidate
-from dotenv import load_dotenv
 
 load_dotenv()
 AWS_S3_URL = os.getenv("AWS_S3_URL", "")
 
 # Configurar el modelo de OpenAI
-llm = ChatOpenAI(
-    model="gpt-4o-mini",
-    api_key=os.getenv("OPENAI_API_KEY"),
-    temperature=0.1
-)
+llm = ChatOpenAI(model="gpt-4o-mini", api_key=os.getenv("OPENAI_API_KEY"), temperature=0.1)
+
 
 def create_cv_analyzer_agent():
     """
@@ -84,6 +84,5 @@ def create_cv_analyzer_agent():
         """,
         tools=[download_cv_from_s3, extract_candidate_data, create_candidate],
         verbose=True,
-        llm=llm
+        llm=llm,
     )
-

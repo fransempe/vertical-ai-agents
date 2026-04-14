@@ -2,7 +2,9 @@
 """
 Crew independiente para procesamiento de CVs
 """
+
 from crewai import Crew, Task
+
 from cv_agent import create_cv_analyzer_agent
 from utils.logger import evaluation_logger
 
@@ -10,18 +12,18 @@ from utils.logger import evaluation_logger
 def create_cv_analysis_crew(filename: str, user_id: str = None, client_id: str = None):
     """
     Crea un crew especializado para analizar un CV desde S3
-    
+
     Args:
         filename: Nombre del archivo CV en S3
         user_id: ID del usuario que crea el candidato (opcional)
         client_id: ID del cliente asociado (opcional)
-        
+
     Returns:
         Crew configurado para análisis de CV
     """
     # Crear agente
     cv_analyzer = create_cv_analyzer_agent()
-    
+
     # Definir tarea
     analyze_task = Task(
         description=f"""
@@ -166,17 +168,12 @@ def create_cv_analysis_crew(filename: str, user_id: str = None, client_id: str =
         - Resultado de creación/actualización en Supabase (candidates)
         Todo presentado de forma clara y legible, con el JSON de observations correctamente formateado
         """,
-        agent=cv_analyzer
+        agent=cv_analyzer,
     )
-    
-    # Crear crew
-    crew = Crew(
-        agents=[cv_analyzer],
-        tasks=[analyze_task],
-        verbose=True
-    )
-    
-    evaluation_logger.log_task_start("CV Analysis Crew", f"Crew creado para analizar: {filename}")
-    
-    return crew
 
+    # Crear crew
+    crew = Crew(agents=[cv_analyzer], tasks=[analyze_task], verbose=True)
+
+    evaluation_logger.log_task_start("CV Analysis Crew", f"Crew creado para analizar: {filename}")
+
+    return crew

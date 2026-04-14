@@ -1,23 +1,25 @@
 # agents.py
 import os
+
 from crewai import Agent
+from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
+
 from tools.supabase_tools import (
     extract_supabase_conversations,
     fetch_job_description,
-    send_evaluation_email,
-    get_current_date,
-    get_jd_interviews_data,
-    get_candidates_data,
     get_all_jd_interviews,
-    get_conversations_by_jd_interview,
-    get_meet_evaluation_data,
-    save_interview_evaluation,
+    get_candidates_data,
     get_client_email,
+    get_conversations_by_jd_interview,
+    get_current_date,
     get_existing_meets_candidates,
     # save_meeting_minute,  # COMENTADO: meeting_minutes_knowledge
+    get_jd_interviews_data,
+    get_meet_evaluation_data,
+    save_interview_evaluation,
+    send_evaluation_email,
 )
-from dotenv import load_dotenv
 
 load_dotenv()
 
@@ -43,6 +45,7 @@ MATCHING_LLM = ChatOpenAI(
 
 common_agent_kwargs = dict(verbose=False, max_iter=1, allow_delegation=False, memory=False)
 
+
 def create_data_extractor_agent():
     """Crea el agente extractor de datos"""
     return Agent(
@@ -58,8 +61,9 @@ def create_data_extractor_agent():
         **TL;DR:** Sé conciso. Extrae solo datos necesarios. Evita explicaciones largas.""",
         tools=[extract_supabase_conversations],
         **common_agent_kwargs,
-        llm=llm
+        llm=llm,
     )
+
 
 def create_filtered_data_extractor_agent():
     """Crea el agente extractor de datos filtrado por jd_interview_id"""
@@ -74,8 +78,9 @@ def create_filtered_data_extractor_agent():
         tools=[get_conversations_by_jd_interview],
         verbose=False,
         max_iter=2,
-        llm=llm
+        llm=llm,
     )
+
 
 def create_conversation_analyzer_agent():
     """Crea el agente analizador de conversaciones"""
@@ -112,8 +117,9 @@ def create_conversation_analyzer_agent():
         Tu objetivo es proporcionar evaluaciones exhaustivas y cualitativas que ayuden a tomar decisiones de contratación informadas y justas.""",
         verbose=False,
         max_iter=2,
-        llm=llm
+        llm=llm,
     )
+
 
 def create_job_description_analyzer_agent():
     """Crea el agente analizador de descripciones de trabajo"""
@@ -148,6 +154,7 @@ def create_job_description_analyzer_agent():
         llm=llm,
     )
 
+
 def create_data_processor_agent():
     """Crea el agente procesador de datos"""
     return Agent(
@@ -164,6 +171,7 @@ def create_data_processor_agent():
         **common_agent_kwargs,
         llm=llm,
     )
+
 
 def create_evaluation_saver_agent():
     """Crea el agente que procesa y guarda la evaluación en la base de datos"""
@@ -191,8 +199,9 @@ def create_evaluation_saver_agent():
         **TL;DR:** Extrae y guarda. Una llamada. Responde solo confirmación. Sin explicaciones largas.""",
         tools=[save_interview_evaluation, get_jd_interviews_data],
         **common_agent_kwargs,
-        llm=llm
+        llm=llm,
     )
+
 
 def create_email_sender_agent():
     """Crea el agente de envío de emails"""
@@ -257,16 +266,14 @@ def create_email_sender_agent():
         llm=FINAL,
     )
 
+
 def create_candidate_matching_agent(user_id: str = None, client_id: str = None):
     """Crea el agente de matcheo de candidatos con entrevistas"""
     from tools.supabase_tools import get_candidates_by_recruiter
-    
+
     # Seleccionar la herramienta correcta según si hay filtros
-    if user_id and client_id:
-        candidates_tool = get_candidates_by_recruiter
-    else:
-        candidates_tool = get_candidates_data
-    
+    candidates_tool = get_candidates_by_recruiter if user_id and client_id else get_candidates_data
+
     return Agent(
         role="Candidate Matching Specialist",
         goal="Realizar matcheo inteligente entre candidatos (tech_stack) y entrevistas (job_description) para encontrar las mejores coincidencias",
@@ -314,6 +321,7 @@ def create_candidate_matching_agent(user_id: str = None, client_id: str = None):
         llm=MATCHING_LLM,  # Usar LLM específico para matching con temperature=0
     )
 
+
 def create_elevenlabs_prompt_generator_agent():
     """Crea el agente que genera el prompt específico para ElevenLabs basado en la JD"""
     return Agent(
@@ -340,8 +348,9 @@ def create_elevenlabs_prompt_generator_agent():
         El prompt debe estar en español y ser específico para la búsqueda, sin ser genérico.""",
         verbose=False,
         max_iter=2,
-        llm=llm
+        llm=llm,
     )
+
 
 def create_single_meet_evaluator_agent():
     """Crea el agente evaluador de un solo meet"""
@@ -385,6 +394,7 @@ def create_single_meet_evaluator_agent():
         llm=llm,
         max_iter=2,
     )
+
 
 # COMENTADO: meeting_minutes_knowledge - función deshabilitada temporalmente
 # def create_meeting_minutes_agent():

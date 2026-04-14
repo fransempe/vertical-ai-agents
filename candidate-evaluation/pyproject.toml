@@ -1,0 +1,57 @@
+[project]
+name = "candidate-evaluation"
+version = "0.1.0"
+description = "API y crews de evaluación de candidatos"
+requires-python = ">=3.11"
+# Dependencias runtime: requirements.txt
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+pythonpath = ["."]
+markers = [
+    "integration: requiere APIs/DB reales (no corre en CI rápido por defecto)",
+]
+addopts = "-q --strict-markers -m \"not integration\""
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]
+
+[tool.coverage.run]
+source = ["."]
+omit = [
+    "tests/*",
+    "*/__pycache__/*",
+    ".venv/*",
+    "venv/*",
+    "test_vector_search.py",
+]
+
+[tool.coverage.report]
+fail_under = 0
+show_missing = true
+skip_covered = true
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+src = ["."]
+exclude = [
+    ".venv",
+    "venv",
+    "__pycache__",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # Pyflakes
+    "I",   # isort
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "SIM", # flake8-simplify
+]
+ignore = [
+    "E501",  # línea larga (legacy en el repo)
+    "B904",  # raise dentro de except sin `from err` (FastAPI/HTTPException y utilidades)
+]
