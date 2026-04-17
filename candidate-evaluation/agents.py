@@ -274,6 +274,9 @@ def create_candidate_matching_agent(user_id: str = None, client_id: str = None):
     # Seleccionar la herramienta correcta según si hay filtros
     candidates_tool = get_candidates_by_recruiter if user_id and client_id else get_candidates_data
 
+    matching_agent_kwargs = dict(common_agent_kwargs)
+    matching_agent_kwargs["max_iter"] = 2
+
     return Agent(
         role="Candidate Matching Specialist",
         goal="Realizar matcheo inteligente entre candidatos (tech_stack) y entrevistas (job_description) para encontrar las mejores coincidencias",
@@ -317,7 +320,7 @@ def create_candidate_matching_agent(user_id: str = None, client_id: str = None):
         
         **TL;DR:** Análisis conciso. Solo scores y matches esenciales. Sin texto innecesario.""",
         tools=[candidates_tool, get_all_jd_interviews, get_existing_meets_candidates],
-        **common_agent_kwargs,
+        **matching_agent_kwargs,
         llm=MATCHING_LLM,  # Usar LLM específico para matching con temperature=0
     )
 
