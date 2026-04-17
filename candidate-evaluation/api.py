@@ -19,14 +19,19 @@ from pydantic import BaseModel
 from supabase import create_client
 
 from cv_crew import create_cv_analysis_crew
-from matching_crew import create_candidate_matching_crew
+from matching_engine import run_deterministic_matching
 from single_meet_crew import create_single_meet_evaluation_crew
 from tools.elevenlabs_tools import (
     create_elevenlabs_agent,
     generate_elevenlabs_prompt_from_jd,
     update_elevenlabs_agent_prompt,
 )
-from tools.supabase_tools import get_client_email, get_meet_evaluation_data, save_meet_evaluation
+from tools.supabase_tools import (
+    get_client_email,
+    get_meet_evaluation_data,
+    log_matching_inputs_debug,
+    save_meet_evaluation,
+)
 from tools.vector_tools import get_supabase_client, search_similar_chunks
 from utils.helpers import clean_uuid
 from utils.logger import evaluation_logger
@@ -331,7 +336,7 @@ def do_matching_long_task(run_id: str, user_id: str | None, client_id: str | Non
         start_time = datetime.now()
 
         # Verificar variables de entorno
-        required_env_vars = ["SUPABASE_URL", "SUPABASE_KEY", "OPENAI_API_KEY"]
+        required_env_vars = ["SUPABASE_URL", "SUPABASE_KEY"]
         missing_vars = [var for var in required_env_vars if not os.getenv(var)]
 
         if missing_vars:
@@ -355,14 +360,12 @@ def do_matching_long_task(run_id: str, user_id: str | None, client_id: str | Non
         matching_runs[run_id] = {
             "status": "running",
             "progress": 0.2,
-            "message": "Creando crew de matching...",
+            "message": "Cargando datos y ejecutando matching determinístico...",
             "runId": run_id,
         }
 
-        print("[MATCHING API] 📋 Creando crew de matching...")
-        # Crear y ejecutar crew de matching
-        crew = create_candidate_matching_crew(user_id=user_id, client_id=client_id)
-        print("[MATCHING API] ✅ Crew creado, iniciando matching...")
+        print("[MATCHING API] 📋 Matching determinístico (fase 2: stack/JD)...")
+        log_matching_inputs_debug(user_id=user_id, client_id=client_id)
 
         matching_runs[run_id] = {
             "status": "running",
@@ -371,135 +374,29 @@ def do_matching_long_task(run_id: str, user_id: str | None, client_id: str | Non
             "runId": run_id,
         }
 
-        result = crew.kickoff()
+        matches_list = run_deterministic_matching(user_id=user_id, client_id=client_id)
+        evaluation_logger.log_task_progress(
+            "Matching API", f"Matches determinísticos: {len(matches_list)} candidato(s) con al menos una búsqueda"
+        )
+        print(f"[MATCHING API] ✅ Matching determinístico: {len(matches_list)} grupo(s) de candidatos con matches")
 
         matching_runs[run_id] = {
             "status": "running",
             "progress": 0.7,
-            "message": "Procesando resultados...",
+            "message": "Finalizando...",
             "runId": run_id,
         }
 
-        # Calcular tiempo de ejecución
         end_time = datetime.now()
         execution_time = str(end_time - start_time)
 
         evaluation_logger.log_task_complete("Matching API", f"Matching completado en {execution_time}")
 
-        # Procesar resultado
-        result_text = str(result)
-        if hasattr(result, "raw"):
-            result_text = result.raw
+        total_matches = len(matches_list)
 
-        # Log del resultado para debugging
-        evaluation_logger.log_task_progress("Matching API", f"Longitud del resultado: {len(result_text)} caracteres")
-        evaluation_logger.log_task_progress("Matching API", f"Primeros 500 caracteres: {result_text[:500]}")
-        evaluation_logger.log_task_progress("Matching API", f"Últimos 200 caracteres: {result_text[-200:]}")
-        if '"matches"' in result_text:
-            evaluation_logger.log_task_progress("Matching API", "El resultado contiene 'matches'")
-        else:
-            evaluation_logger.log_task_progress("Matching API", "⚠️ El resultado NO contiene 'matches'")
-
-        # Intentar parsear el resultado como JSON
-        matches_data = None
-        try:
-            matches_data = json.loads(result_text)
-            evaluation_logger.log_task_progress("Matching API", "Resultado parseado como JSON exitosamente")
-        except json.JSONDecodeError:
-            evaluation_logger.log_task_progress(
-                "Matching API", "Resultado no es JSON válido, intentando extraer datos del texto"
-            )
-
-            # Intentar extraer JSON del texto usando múltiples estrategias
-            json_extracted = None
-
-            # Estrategia 1: Buscar JSON dentro de bloques de código markdown (```json ... ```)
-            markdown_json_pattern = r'```(?:json)?\s*(\{.*?"matches".*?\})\s*```'
-            markdown_matches = re.findall(markdown_json_pattern, result_text, re.DOTALL)
-            if markdown_matches:
-                try:
-                    json_extracted = json.loads(markdown_matches[0])
-                    evaluation_logger.log_task_progress("Matching API", "JSON extraído de bloque markdown exitosamente")
-                except json.JSONDecodeError:
-                    pass
-
-            # Estrategia 2: Buscar JSON que contenga "matches" usando búsqueda de llaves balanceadas
-            if not json_extracted:
-                # Encontrar todas las posiciones donde aparece "matches"
-                matches_positions = [m.start() for m in re.finditer(r'"matches"', result_text)]
-                for match_pos in matches_positions:
-                    # Buscar hacia atrás para encontrar el { inicial
-                    start_pos = result_text.rfind("{", 0, match_pos)
-                    if start_pos == -1:
-                        continue
-
-                    # Buscar hacia adelante para encontrar el } final balanceado
-                    brace_count = 0
-                    end_pos = -1
-                    for i in range(start_pos, len(result_text)):
-                        if result_text[i] == "{":
-                            brace_count += 1
-                        elif result_text[i] == "}":
-                            brace_count -= 1
-                            if brace_count == 0:
-                                end_pos = i
-                                break
-
-                    if end_pos != -1:
-                        potential_json = result_text[start_pos : end_pos + 1]
-                        try:
-                            json_extracted = json.loads(potential_json)
-                            evaluation_logger.log_task_progress(
-                                "Matching API", "JSON extraído del texto usando búsqueda balanceada exitosamente"
-                            )
-                            break
-                        except json.JSONDecodeError:
-                            continue
-
-            # Estrategia 3: Buscar desde el primer { hasta el último } que contenga "matches"
-            if not json_extracted:
-                first_brace = result_text.find("{")
-                last_brace = result_text.rfind("}")
-                if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
-                    potential_json = result_text[first_brace : last_brace + 1]
-                    if '"matches"' in potential_json:
-                        try:
-                            json_extracted = json.loads(potential_json)
-                            evaluation_logger.log_task_progress(
-                                "Matching API", "JSON extraído usando estrategia de búsqueda de llaves exitosamente"
-                            )
-                        except json.JSONDecodeError:
-                            pass
-
-            matches_data = json_extracted
-            if not matches_data:
-                evaluation_logger.log_task_progress("Matching API", "No se pudo extraer JSON válido del texto")
-
-        # Extraer la lista de matches
-        matches_list = []
-        total_matches = 0
-        if matches_data:
-            if isinstance(matches_data, dict) and "matches" in matches_data:
-                matches_list = matches_data["matches"]
-                total_matches = len(matches_list)
-                evaluation_logger.log_task_progress("Matching API", f"Matches extraídos del dict: {total_matches}")
-            elif isinstance(matches_data, list):
-                matches_list = matches_data
-                total_matches = len(matches_list)
-                evaluation_logger.log_task_progress("Matching API", f"Matches extraídos de la lista: {total_matches}")
-            else:
-                evaluation_logger.log_task_progress("Matching API", "Formato de datos no reconocido")
-        else:
-            evaluation_logger.log_task_progress("Matching API", "No se pudieron extraer matches del resultado")
-            matches_data = {
-                "matches": [],
-                "raw_result": result_text[:1000] + "..." if len(result_text) > 1000 else result_text,
-            }
-
-        # Guardar resultado
         result_data = {
             "status": "success",
-            "message": "Matching de candidatos completado exitosamente",
+            "message": "Matching de candidatos completado exitosamente (motor determinístico)",
             "timestamp": start_time.strftime("%Y-%m-%d %H:%M:%S"),
             "execution_time": execution_time,
             "matches": matches_list,

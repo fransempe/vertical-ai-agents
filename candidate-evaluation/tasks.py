@@ -687,7 +687,20 @@ def create_matching_task(agent, user_id: str = None, client_id: str = None):
         - Si no tienes un dato, NO lo inventes. Usa SOLO lo que está en la base de datos
 
         🎯 Realizar matching inteligente entre candidatos (tech_stack) y entrevistas (tech_stack). Si la entrevista no tiene tech_stack, usar job_description como fallback.
-        
+
+        📌 **PROTOCOLO — MATCHING POR ORACIONES (para calidad del análisis, NO para excluir candidatos):**
+        - Este protocolo sirve para **explicar** el match en match_analysis y para priorizar evidencia; **NO** uses la falta
+          de una oración "perfecta" para **dejar fuera** un candidato si ya hay coincidencia clara entre el tech_stack del
+          candidato y el tech_stack de la JD (o entre skills del candidato y keywords del job_description) según las reglas inclusivas.
+        - Para cada entrevista, tomá el texto a analizar: siempre el **job_description** completo de la herramienta;
+          si además hay **tech_stack** de la entrevista (string), usalo como lista de requisitos y cruzalo con el JD.
+        - Partí el job_description en **oraciones** o **líneas** (puntos, saltos de línea, viñetas). Cada viñeta cuenta como unidad.
+        - Para **cada** skill del candidato, indicá **qué parte del JD** la respalda cuando sea posible; si hay coincidencia
+          por variaciones inclusivas (React/ReactJS, etc.) pero el texto del JD es pobre, **incluí el match igual** con score acorde.
+        - Priorizá evidencia en la **misma oración** cuando exista; si no, no bloquees el match.
+        - **No inventes** frases del puesto: solo texto real de la BD.
+        - En **match_analysis**, resumí brevemente el respaldo (sin citar texto inventado).
+
         📊 **PROCESO DE MATCHING:**
         
         1. 📋 **Obtener Datos de Candidatos:**
@@ -709,7 +722,8 @@ def create_matching_task(agent, user_id: str = None, client_id: str = None):
            - Ejemplo: Si el resultado es {{"jd_123": ["cand_1", "cand_2"]}}, entonces NO incluir cand_1 ni cand_2 en los matches para jd_123
         
         4. 🔍 **Análisis de Compatibilidad Técnica (tech_stack):**
-           Para cada candidato vs cada entrevista (solo los que NO tienen meet existente):
+           Para cada candidato vs cada entrevista (solo los que NO tienen meet existente), aplicá primero el
+           **PROTOCOLO OBLIGATORIO — MATCHING POR ORACIONES**; después calculá scores:
            - Obtener el tech_stack del candidato (array de strings)
            - Obtener el tech_stack de la entrevista (string separado por comas, puede ser null o vacío)
            - Si la entrevista NO tiene tech_stack o está vacío, usar el job_description como fallback para la comparación
@@ -751,29 +765,29 @@ def create_matching_task(agent, user_id: str = None, client_id: str = None):
              * Información adicional relevante: 10%
            - Generar un análisis textual breve (1-2 líneas) sobre la compatibilidad de observations con el JD
         
-        5. 📊 **Criterios de Evaluación (combinando tech_stack y observations):**
+        5. 📊 **Criterios de Evaluación (combinando tech_stack y observations) — versión SUAVE (prioridad al match técnico):**
            **Para tech_stack (SER INCLUSIVO Y GENEROSO):**
-           - Coincidencias exactas: 40% (tecnologías que coinciden exactamente entre el tech_stack del candidato y el tech_stack de la entrevista)
-           - Coincidencias relacionadas: 30% (frameworks/herramientas relacionadas o variaciones, ej: React=ReactJS, JavaScript=JS)
-           - Tecnologías complementarias: 20% (tecnologías del JD que complementan las del candidato)
-           - Gaps críticos: -10% (tecnologías esenciales del tech_stack del JD que faltan en el candidato)
-           - **Score base INCLUSIVO**: Calcular como (coincidencias_exactas + coincidencias_relacionadas) / total_tech_jd * 100
-           - **Score mínimo GENEROSO**: 15% si hay al menos una coincidencia (exacta o relacionada)
-           - **BONIFICACIÓN**: Si hay múltiples coincidencias, sumar bonificaciones (no solo dividir)
-           - **NO SER ESTRICTO**: Incluir candidatos incluso con coincidencias parciales o relacionadas
-           - Si el JD no tiene tech_stack, usar job_description como fallback para la comparación
-           - **IMPORTANTE**: Si un candidato tiene tecnologías relacionadas o complementarias, darle un score razonable (mínimo 15-20%)
+           - Coincidencias exactas: 35% del peso interno del bloque técnico
+           - Coincidencias relacionadas: 35% (variaciones, ej: React=ReactJS, JavaScript=JS)
+           - Tecnologías complementarias: 25%
+           - Gaps críticos: como mucho **-5%** (no castigar fuerte; solo si falta algo esencial explícito en el JD)
+           - **Score base INCLUSIVO**: favorecé (coincidencias_exactas + relacionadas) frente a penalizar gaps
+           - **Score mínimo GENEROSO**: **22%** si hay al menos una coincidencia (exacta o relacionada); podés subir hasta ~35% si el encaje es claro aunque no sea el 100% del stack
+           - **BONIFICACIÓN**: varias coincidencias → subir el score técnico de forma suave (no ser austero)
+           - Si el JD no tiene tech_stack, usar job_description como fallback
            
-           **Para observations (si está disponible):**
-           - Relevancia de experiencia laboral: 30% (empresas, posiciones, responsabilidades relevantes)
-           - Coincidencia de rubros/industrias: 25% (rubros del candidato vs tipo de empresa/cliente del JD)
-           - Cumplimiento de requisitos de idiomas: 20% (idiomas del candidato vs requisitos del JD)
-           - Relevancia de certificaciones: 15% (certificaciones relevantes para el puesto)
-           - Información adicional relevante: 10% (proyectos, publicaciones, etc. relevantes)
+           **Para observations (si está disponible) — solo refuerzo, no castigo fuerte:**
+           - Misma lógica de pesos relativos (experiencia, rubros, idiomas, certificaciones, other), pero el observations_score
+             debe interpretarse como **bonus** cuando hay buen encaje, no como motivo para tumbar un candidato con buen tech.
            
-           **Score final combinado:**
-           - Si el candidato tiene observations: Score final = (tech_stack_score * 0.6) + (observations_score * 0.4)
-           - Si el candidato NO tiene observations: Score final = tech_stack_score
+           **Score final combinado (compatibility_score) — REGLA CLAVE:**
+           - Si el candidato **NO** tiene observations: **compatibility_score = tech_stack_score**
+           - Si tiene observations:
+             * Calculá **blend** = (tech_stack_score × **0.82**) + (observations_score × **0.18**)
+             * **Si tech_stack_score > 0:** el compatibility_score debe ser **max(blend, tech_stack_score)** — es decir, las observations
+               **no pueden bajar** el resultado por debajo del match técnico; solo pueden **mantener o subir** el número final.
+             * Si tech_stack_score == 0 pero observations sugieren encaje muy alto, podés dar un score bajo-moderado (caso raro); si no, excluí (score 0).
+           - En la práctica: **hubo match técnico (>0) ⇒ el candidato queda con un score final al menos tan alto como el técnico**, salvo redondeo a entero.
         
         6. 🎯 **Generar Resultados SIMPLIFICADOS:**
            - SOLO mostrar candidatos que tengan matches (score > 0) ordenados por score de mayor a menor
