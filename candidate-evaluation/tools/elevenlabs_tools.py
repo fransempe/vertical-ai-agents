@@ -1,83 +1,87 @@
 import os
-from typing import Optional, Dict, Any
-from elevenlabs.client import ElevenLabs
-from dotenv import load_dotenv
 import sys
+from typing import Any
+
+from dotenv import load_dotenv
+from elevenlabs.client import ElevenLabs
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-from utils.logger import evaluation_logger
+from os import getenv
+
+from crewai import Crew, Process
+
 from agents import create_elevenlabs_prompt_generator_agent
 from tasks import create_elevenlabs_prompt_generation_task
-from crewai import Crew, Process
-from os import getenv
+from utils.logger import evaluation_logger
 
 load_dotenv()
 
 
-def generate_elevenlabs_prompt_from_jd(interview_name: str, job_description: str, sender_email: str) -> Dict[str, Any]:
+def generate_elevenlabs_prompt_from_jd(interview_name: str, job_description: str, sender_email: str) -> dict[str, Any]:
     """
     Genera un prompt específico para ElevenLabs usando un agente de CrewAI basado en la JD,
     y extrae los datos del cliente.
-    
+
     Args:
         interview_name: Nombre de la entrevista/búsqueda
         job_description: Descripción del trabajo
         sender_email: Email del remitente
-        
+
     Returns:
         Diccionario con 'prompt' y 'cliente' (nombre, responsable, email, telefono)
     """
     try:
-        evaluation_logger.log_task_start("Generar Prompt ElevenLabs", f"Generando prompt y extrayendo datos del cliente para: {interview_name}")
-        
+        evaluation_logger.log_task_start(
+            "Generar Prompt ElevenLabs", f"Generando prompt y extrayendo datos del cliente para: {interview_name}"
+        )
+
         # Crear agente y tarea
         agent = create_elevenlabs_prompt_generator_agent()
         task = create_elevenlabs_prompt_generation_task(agent, interview_name, job_description, sender_email)
-        
+
         # Crear crew y ejecutar
-        crew = Crew(
-            agents=[agent],
-            tasks=[task],
-            process=Process.sequential,
-            verbose=False
-        )
-        
+        crew = Crew(agents=[agent], tasks=[task], process=Process.sequential, verbose=False)
+
         result = crew.kickoff()
-        
+
         # Extraer el resultado
         result_text = str(result).strip()
-        
+
         # Intentar parsear como JSON
         import json
+
         try:
             # Buscar JSON en el resultado
             json_match = None
-            if result_text.startswith('{'):
+            if result_text.startswith("{"):
                 json_match = result_text
             else:
                 # Buscar JSON dentro del texto
                 import re
-                json_pattern = r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}'
+
+                json_pattern = r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}"
                 matches = re.findall(json_pattern, result_text, re.DOTALL)
                 if matches:
                     json_match = matches[-1]  # Tomar el último match (más probable que sea el completo)
-            
+
             if json_match:
                 result_data = json.loads(json_match)
-                prompt_text = result_data.get('prompt', '').strip()
-                cliente_data = result_data.get('cliente', {})
-                agent_name = result_data.get('agent_name', '').strip()
-                
-                evaluation_logger.log_task_complete("Generar Prompt ElevenLabs", f"Prompt, datos del cliente y nombre del agente generados exitosamente")
+                prompt_text = result_data.get("prompt", "").strip()
+                cliente_data = result_data.get("cliente", {})
+                agent_name = result_data.get("agent_name", "").strip()
+
+                evaluation_logger.log_task_complete(
+                    "Generar Prompt ElevenLabs", "Prompt, datos del cliente y nombre del agente generados exitosamente"
+                )
                 return {
-                    'prompt': prompt_text,
-                    'cliente': {
-                        'nombre': cliente_data.get('nombre') or '',
-                        'responsable': cliente_data.get('responsable') or '',
-                        'email': cliente_data.get('email') or sender_email,
-                        'telefono': cliente_data.get('telefono') or ''
+                    "prompt": prompt_text,
+                    "cliente": {
+                        "nombre": cliente_data.get("nombre") or "",
+                        "responsable": cliente_data.get("responsable") or "",
+                        "email": cliente_data.get("email") or sender_email,
+                        "telefono": cliente_data.get("telefono") or "",
                     },
-                    'agent_name': agent_name
+                    "agent_name": agent_name,
                 }
         except (json.JSONDecodeError, KeyError) as e:
             evaluation_logger.log_error("Generar Prompt ElevenLabs", f"Error parseando JSON: {str(e)}")
@@ -87,44 +91,37 @@ def generate_elevenlabs_prompt_from_jd(interview_name: str, job_description: str
                 prompt_text = prompt_text[1:-1]
             if prompt_text.startswith("'") and prompt_text.endswith("'"):
                 prompt_text = prompt_text[1:-1]
-        
+
         # Fallback: retornar solo el prompt si no se pudo parsear
         evaluation_logger.log_task_progress("Generar Prompt ElevenLabs", "No se pudo parsear JSON, usando fallback")
         return {
-            'prompt': prompt_text if 'prompt_text' in locals() else f"""Actúa como un entrevistador técnico profesional y amable que realiza entrevistas para la siguiente búsqueda:
+            "prompt": prompt_text
+            if "prompt_text" in locals()
+            else f"""Actúa como un entrevistador técnico profesional y amable que realiza entrevistas para la siguiente búsqueda:
 
 Búsqueda: {interview_name}
 
 Descripción del puesto:
 {job_description}""",
-            'cliente': {
-                'nombre': '',
-                'responsable': '',
-                'email': sender_email,
-                'telefono': ''
-            },
-            'agent_name': interview_name
+            "cliente": {"nombre": "", "responsable": "", "email": sender_email, "telefono": ""},
+            "agent_name": interview_name,
         }
-        
+
     except Exception as e:
         evaluation_logger.log_error("Generar Prompt ElevenLabs", f"Error generando prompt: {str(e)}")
         import traceback
+
         evaluation_logger.log_error("Generar Prompt ElevenLabs", f"Traceback: {traceback.format_exc()}")
         # Retornar prompt por defecto si falla
         return {
-            'prompt': f"""Actúa como un entrevistador técnico profesional y amable que realiza entrevistas para la siguiente búsqueda:
+            "prompt": f"""Actúa como un entrevistador técnico profesional y amable que realiza entrevistas para la siguiente búsqueda:
 
 Búsqueda: {interview_name}
 
 Descripción del puesto:
 {job_description}""",
-            'cliente': {
-                'nombre': '',
-                'responsable': '',
-                'email': sender_email,
-                'telefono': ''
-            },
-            'agent_name': interview_name
+            "cliente": {"nombre": "", "responsable": "", "email": sender_email, "telefono": ""},
+            "agent_name": interview_name,
         }
 
 
@@ -137,11 +134,11 @@ def create_elevenlabs_agent(
     language: str = "es",
     voice_id: str = "bN1bDXgDIGX5lw0rtY2B",  # Melanie
     model_id: str = "eleven_flash_v2_5",
-    llm: str = "gemini-2.5-flash"
-) -> Optional[Dict[str, Any]]:
+    llm: str = "gemini-2.5-flash",
+) -> dict[str, Any] | None:
     """
     Crea un agente de voz en ElevenLabs para una búsqueda de trabajo.
-    
+
     Args:
         agent_name: Nombre del agente (ej: "Agente ReactJS")
         interview_name: Nombre de la entrevista/búsqueda
@@ -151,32 +148,32 @@ def create_elevenlabs_agent(
         voice_id: ID de la voz a usar (default: Melanie)
         model_id: Modelo TTS a usar (default: "eleven_flash_v2_5")
         llm: Modelo LLM a usar (default: "gemini-2.5-flash")
-        
+
     Returns:
         Diccionario con la respuesta de ElevenLabs o None si falla
     """
     try:
         evaluation_logger.log_task_start("Crear Agente ElevenLabs", f"Creando agente: {agent_name}")
-        
+
         api_key = os.getenv("ELEVENLABS_API_KEY")
         if not api_key:
             evaluation_logger.log_error("Crear Agente ElevenLabs", "ELEVENLABS_API_KEY no configurada")
             return None
-        
+
         # Inicializar cliente
         client = ElevenLabs(api_key=api_key)
-        
+
         # Generar prompt específico y extraer datos del cliente usando el agente de CrewAI
         result_data = generate_elevenlabs_prompt_from_jd(interview_name, job_description, sender_email)
-        generated_prompt = result_data.get('prompt', '')
-        cliente_data = result_data.get('cliente', {})
-        
+        generated_prompt = result_data.get("prompt", "")
+        cliente_data = result_data.get("cliente", {})
+
         # Usar el nombre del agente generado por el agente de CrewAI, o el proporcionado como fallback.
         # Evitar nombres inválidos como "null - Búsqueda XXX" o que contengan "null".
-        generated_agent_name = (result_data.get('agent_name') or '').strip()
+        generated_agent_name = (result_data.get("agent_name") or "").strip()
         if generated_agent_name:
             # Si el LLM devolvió algo que contiene "null" lo consideramos inválido y usamos el fallback original.
-            if 'null' in generated_agent_name.lower():
+            if "null" in generated_agent_name.lower():
                 evaluation_logger.log_task_progress(
                     "Crear Agente ElevenLabs",
                     f"Nombre de agente generado inválido detectado ('{generated_agent_name}'); usando fallback: {agent_name}",
@@ -197,11 +194,11 @@ def create_elevenlabs_agent(
                 "Crear Agente ElevenLabs",
                 f"Añadiendo nombre de cliente al agente: '{original_name}' -> '{agent_name}'",
             )
-        
+
         # Generar mensaje inicial si no se proporciona (después de obtener el nombre generado)
         if not first_message:
             first_message = "Hola, soy Clara, la entrevistadora del equipo de recruiting. ¿Estás listo para empezar?"
-        
+
         # Estructura obligatoria de la entrevista
         estructura_obligatoria = """
 
@@ -255,8 +252,11 @@ Debes realizar EXACTAMENTE las siguientes preguntas en este orden:
 - NO hagas más de 1 pregunta sobre la experiencia del candidato 
 - NO hagas más de 1 pregunta de habilidades blandas y que sea breve
 - NO hagas más de 3 preguntas técnicas
-- Al finalizar las 5 preguntas, agradece al candidato y cierra la entrevista"""
-        
+- Al finalizar las 5 preguntas, agrega SIEMPRE una pregunta final de cierre: "¿Tenés alguna pregunta o alguna duda?"
+- Hacia el final de la entrevista, incentiva activamente al candidato a realizar preguntas sobre el proceso, el rol o el cliente
+- Antes de cerrar la entrevista, indicá explícitamente: "Para finalizar la entrevista con éxito, hacé click en Finalizar y luego cierra la ventana del navegador"
+- Después de esa indicación, agradece al candidato y cierra la entrevista"""
+
         # Concatenar el prompt generado con la estructura obligatoria
         prompt_text = generated_prompt + estructura_obligatoria
         tool_id = getenv("ELEVENLABS_TOOL_ID")
@@ -264,6 +264,9 @@ Debes realizar EXACTAMENTE las siguientes preguntas en este orden:
         eleven_labs_data = {
             "name": agent_name,
             "conversation_config": {
+                "conversation": {
+                    "max_duration_seconds": 7200,
+                },
                 "agent": {
                     "first_message": first_message,
                     "prompt": {
@@ -272,46 +275,41 @@ Debes realizar EXACTAMENTE las siguientes preguntas en este orden:
                         # Asociar tools dentro del prompt, según esquema de ElevenLabs
                         "tool_ids": [tool_id],
                     },
-                    "language": language
+                    "language": language,
                 },
-                "tts": {
-                    "model_id": model_id,
-                    "voice_id": voice_id
-                }
-            }
+                "tts": {"model_id": model_id, "voice_id": voice_id},
+            },
         }
-        
+
         # Crear agente usando la configuración anterior
         response = client.conversational_ai.agents.create(**eleven_labs_data)
-        
-        evaluation_logger.log_task_complete(
-            "Crear Agente ElevenLabs", 
-            f"Agente creado exitosamente: {agent_name}"
-        )
-        
+
+        evaluation_logger.log_task_complete("Crear Agente ElevenLabs", f"Agente creado exitosamente: {agent_name}")
+
         # Convertir respuesta a diccionario si es necesario
         result_dict = None
-        if hasattr(response, 'dict'):
+        if hasattr(response, "dict"):
             result_dict = response.dict()
-        elif hasattr(response, '__dict__'):
+        elif hasattr(response, "__dict__"):
             result_dict = response.__dict__
         else:
             result_dict = {"agent_id": str(response) if response else None, "name": agent_name}
-        
+
         # Agregar datos del cliente al resultado
         if result_dict and isinstance(result_dict, dict):
-            result_dict['cliente_data'] = cliente_data
-        
+            result_dict["cliente_data"] = cliente_data
+
         return result_dict
-            
+
     except Exception as e:
         evaluation_logger.log_error("Crear Agente ElevenLabs", f"Error creando agente: {str(e)}")
         import traceback
+
         evaluation_logger.log_error("Crear Agente ElevenLabs", f"Traceback: {traceback.format_exc()}")
         return None
 
 
-def update_elevenlabs_agent_prompt(agent_id: str, prompt_text: str) -> Optional[Dict[str, Any]]:
+def update_elevenlabs_agent_prompt(agent_id: str, prompt_text: str) -> dict[str, Any] | None:
     """
     Actualiza únicamente el prompt de un agente existente de ElevenLabs.
 
@@ -323,34 +321,21 @@ def update_elevenlabs_agent_prompt(agent_id: str, prompt_text: str) -> Optional[
         Diccionario con la respuesta de ElevenLabs o None si falla
     """
     try:
-        evaluation_logger.log_task_start(
-            "Actualizar Agente ElevenLabs",
-            f"Actualizando prompt del agente: {agent_id}"
-        )
+        evaluation_logger.log_task_start("Actualizar Agente ElevenLabs", f"Actualizando prompt del agente: {agent_id}")
 
         api_key = os.getenv("ELEVENLABS_API_KEY")
         if not api_key:
             raise ValueError("ELEVENLABS_API_KEY no está configurada")
 
-        client = ElevenLabs(
-            api_key=api_key,
-            base_url="https://api.elevenlabs.io"
-        )
+        client = ElevenLabs(api_key=api_key, base_url="https://api.elevenlabs.io")
 
         # Realizar PATCH para actualizar solo el prompt
         response = client.conversational_ai.agents.update(
-            agent_id=agent_id,
-            conversation_config={
-                "agent": {
-                    "prompt": {
-                        "prompt": prompt_text
-                    }
-                }
-            }
+            agent_id=agent_id, conversation_config={"agent": {"prompt": {"prompt": prompt_text}}}
         )
 
         # Convertir respuesta a diccionario si es necesario
-        result_dict: Optional[Dict[str, Any]] = None
+        result_dict: dict[str, Any] | None = None
         if hasattr(response, "dict"):
             result_dict = response.dict()
         elif hasattr(response, "__dict__"):
@@ -359,20 +344,14 @@ def update_elevenlabs_agent_prompt(agent_id: str, prompt_text: str) -> Optional[
             result_dict = {"agent_id": agent_id, "result": str(response)}
 
         evaluation_logger.log_task_complete(
-            "Actualizar Agente ElevenLabs",
-            f"Prompt actualizado correctamente para agent_id={agent_id}"
+            "Actualizar Agente ElevenLabs", f"Prompt actualizado correctamente para agent_id={agent_id}"
         )
 
         return result_dict
 
     except Exception as e:
-        evaluation_logger.log_error(
-            "Actualizar Agente ElevenLabs",
-            f"Error actualizando agente {agent_id}: {str(e)}"
-        )
+        evaluation_logger.log_error("Actualizar Agente ElevenLabs", f"Error actualizando agente {agent_id}: {str(e)}")
         import traceback
-        evaluation_logger.log_error(
-            "Actualizar Agente ElevenLabs",
-            f"Traceback: {traceback.format_exc()}"
-        )
+
+        evaluation_logger.log_error("Actualizar Agente ElevenLabs", f"Traceback: {traceback.format_exc()}")
         return None

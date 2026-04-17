@@ -1,0 +1,15 @@
+# Desarrollo y CI para candidate-evaluation
+# Instalar: pip install -r requirements.txt -r requirements-dev.txt
+#
+# Guía completa de testing (estrategia, inventario, tandas, CI): docs/TESTING.md
+#
+# Comandos útiles (desde agents/candidate-evaluation):
+#   pytest                          # unitarios (excluye @integration por defecto en pyproject)
+#   pytest --cov=. --cov-report=term-missing
+#   pytest -m integration --override-ini addopts="-q --strict-markers"  # solo integración
+#   ruff check tests                # recomendado en CI; el repo completo puede tener avisos legacy
+#   ruff check . && ruff format .  # cuando quieras ir limpiando todo el paquete
+
+pytest>=8.0,<9
+pytest-cov>=5.0,<7
+ruff>=0.8,<1

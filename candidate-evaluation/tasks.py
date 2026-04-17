@@ -1,5 +1,6 @@
 from crewai import Task
 
+
 def create_extraction_task(agent):
     """Tarea de extracción de datos"""
     return Task(
@@ -16,8 +17,9 @@ def create_extraction_task(agent):
         - Datos completos del candidato (id, name, email, phone, cv_url, tech_stack)
         """,
         expected_output="Lista JSON de conversaciones con toda la información relacionada",
-        agent=agent
+        agent=agent,
     )
+
 
 def create_analysis_task(agent, extraction_task):
     """Tarea de análisis de conversaciones"""
@@ -76,8 +78,9 @@ def create_analysis_task(agent, extraction_task):
         """,
         expected_output="JSON con análisis conciso de cada conversación: puntajes 0-10, comentarios breves (1-2 líneas), preguntas técnicas identificadas, y recomendación final",
         agent=agent,
-        context=[extraction_task]
+        context=[extraction_task],
     )
+
 
 def create_job_analysis_task(agent, extraction_task):
     """Tarea de análisis de descripciones de trabajo"""
@@ -130,8 +133,9 @@ def create_job_analysis_task(agent, extraction_task):
         """,
         expected_output="Análisis detallado de cada descripción de trabajo desde jd_interviews en formato JSON",
         agent=agent,
-        context=[extraction_task]
+        context=[extraction_task],
     )
+
 
 def create_candidate_job_comparison_task(agent, extraction_task, analysis_task, job_analysis_task):
     """Tarea de comparación candidato vs descripción de trabajo"""
@@ -181,8 +185,9 @@ def create_candidate_job_comparison_task(agent, extraction_task, analysis_task, 
         """,
         expected_output="Análisis textual breve de matcheo candidato-puesto en formato JSON",
         agent=agent,
-        context=[extraction_task, analysis_task, job_analysis_task]
+        context=[extraction_task, analysis_task, job_analysis_task],
     )
+
 
 def create_processing_task(agent, extraction_task, analysis_task, job_analysis_task, comparison_task):
     """Tarea de procesamiento final"""
@@ -278,8 +283,9 @@ def create_processing_task(agent, extraction_task, analysis_task, job_analysis_t
         """,
         expected_output="JSON que contenga tanto el reporte completo como el reporte formateado. Estructura: {'full_report': {...} }",
         agent=agent,
-        context=[extraction_task, analysis_task, job_analysis_task, comparison_task]
+        context=[extraction_task, analysis_task, job_analysis_task, comparison_task],
     )
+
 
 def create_email_sending_task(agent, processing_task):
     """Tarea de envío de email con resultados"""
@@ -448,8 +454,9 @@ def create_email_sending_task(agent, processing_task):
         """,
         expected_output="Confirmación del envío y copia del reporte completo formateado según el formato exacto especificado",
         agent=agent,
-        context=[processing_task]
+        context=[processing_task],
     )
+
 
 def create_evaluation_saving_task(agent, processing_task, jd_interview_id: str = None):
     """Tarea de guardado de evaluación en la base de datos"""
@@ -464,7 +471,7 @@ DEBES llamar a save_interview_evaluation con este ID. NO es opcional.
 ⚠️ **IMPORTANTE:** No hay jd_interview_id disponible. Busca jd_interview_id en el full_report o en las tareas anteriores.
 Si no encuentras jd_interview_id, NO puedes guardar.
 """
-    
+
     return Task(
         description=f"""💾 **TAREA CRÍTICA:** Procesar el resultado del análisis y guardar en interview_evaluations.
 
@@ -624,8 +631,9 @@ Si no encuentras jd_interview_id, NO puedes guardar.
         """,
         expected_output="Confirmación del guardado en interview_evaluations con evaluation_id o mensaje específico indicando por qué no se pudo guardar",
         agent=agent,
-        context=[processing_task]
+        context=[processing_task],
     )
+
 
 def create_filtered_extraction_task(agent, jd_interview_id: str):
     """Tarea de extracción de datos filtrada por jd_interview_id"""
@@ -652,19 +660,19 @@ def create_filtered_extraction_task(agent, jd_interview_id: str):
         - Información del jd_interview (nombre, agent_id, client_id)
         """,
         expected_output=f"Lista JSON de conversaciones filtradas por jd_interview_id: {jd_interview_id} con toda la información relacionada. Si no hay conversaciones, incluir mensaje informativo: 'No se han presentado candidatos para esta entrevista'. IMPORTANTE: Incluir siempre la información del jd_interview (id, name, agent_id, client_id) para usar en el título del reporte.",
-        agent=agent
+        agent=agent,
     )
+
 
 def create_matching_task(agent, user_id: str = None, client_id: str = None):
     """Tarea de matching de candidatos con entrevistas"""
-    from tools.supabase_tools import get_candidates_by_recruiter
-    
+
     # Determinar qué herramienta usar y la descripción
     if user_id and client_id:
         candidates_instruction = f"- Usar get_candidates_by_recruiter(user_id='{user_id}', client_id='{client_id}', limit=1000) para obtener candidatos filtrados por user_id y client_id"
     else:
         candidates_instruction = "- Usar get_candidates_data() para obtener todos los candidatos"
-    
+
     return Task(
         description=f"""
         ⏱️ Antes de comenzar, imprime: START MATCHING [YYYY-MM-DD HH:MM:SS]. Al finalizar, imprime: END MATCHING [YYYY-MM-DD HH:MM:SS].
@@ -845,8 +853,9 @@ def create_matching_task(agent, user_id: str = None, client_id: str = None):
         - **CRÍTICO**: La respuesta completa debe ser parseable directamente con json.loads()
         """,
         expected_output="SOLO JSON válido con estructura: {'matches': [{'candidate': {...}, 'matching_interviews': [{'jd_interviews': {...}, 'compatibility_score': X, 'match_analysis': '...', 'observations_match': {...} (si observations está disponible)}]}]}",
-        agent=agent
+        agent=agent,
     )
+
 
 def create_single_meet_extraction_task(agent, meet_id: str):
     """Tarea de extracción de datos de un meet específico"""
@@ -871,8 +880,9 @@ def create_single_meet_extraction_task(agent, meet_id: str):
         """,
         expected_output="JSON completo con meet, conversation, candidate, jd_interview y client",
         max_iter=2,
-        agent=agent
+        agent=agent,
     )
+
 
 def create_single_meeting_minutes_task(agent, extraction_task, evaluation_task):
     """Tarea para generar y guardar una minuta breve de un meet específico"""
@@ -948,6 +958,7 @@ def create_single_meeting_minutes_task(agent, extraction_task, evaluation_task):
         context=[extraction_task, evaluation_task],
     )
 
+
 def create_elevenlabs_prompt_generation_task(agent, interview_name: str, job_description: str, sender_email: str):
     """Tarea para generar el prompt específico de ElevenLabs basado en la JD y extraer datos del cliente"""
     return Task(
@@ -970,7 +981,7 @@ def create_elevenlabs_prompt_generation_task(agent, interview_name: str, job_des
            - Herramientas y frameworks mencionados
            - Responsabilidades técnicas clave
            - Nivel de experiencia esperado
-           - Conocimientos específicos necesarios
+           - Conocimientos específicos necesarios 
         
         2. Crea un prompt que:
            - Defina el rol del entrevistador como un profesional técnico especializado en estas tecnologías
@@ -1038,8 +1049,9 @@ def create_elevenlabs_prompt_generation_task(agent, interview_name: str, job_des
         Si no encuentras algún dato, usa null o una cadena vacía.
         """,
         expected_output="JSON con tres campos: 'prompt' (texto del prompt), 'cliente' (objeto con nombre, responsable, email, telefono) y 'agent_name' (nombre del agente en formato 'Cliente - Búsqueda')",
-        agent=agent
+        agent=agent,
     )
+
 
 def create_single_meet_evaluation_task(agent, extraction_task):
     """Tarea de evaluación completa de un solo meet"""
@@ -1290,5 +1302,5 @@ def create_single_meet_evaluation_task(agent, extraction_task):
         """,
         expected_output="JSON completo con análisis exhaustivo y determinación de match potencial",
         agent=agent,
-        context=[extraction_task]
+        context=[extraction_task],
     )
