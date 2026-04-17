@@ -2,7 +2,7 @@
 
 Guía para preparar el entorno local y ejecutar el paquete `agents/candidate-evaluation`: API FastAPI, crews CrewAI, integración con Supabase y OpenAI.
 
-Para pruebas automatizadas y CI, ver [`TESTING.md`](TESTING.md). Para pgvector y búsqueda vectorial en Supabase, ver [`PGVECTOR_SETUP.md`](PGVECTOR_SETUP.md).
+Para pruebas automatizadas y CI, ver [`TESTING.md`](TESTING.md). Para pgvector y búsqueda vectorial en Supabase, ver [`PGVECTOR_SETUP.md`](PGVECTOR_SETUP.md). Para **procesos de negocio** implementados en el servicio (matching candidatos–JD, etc.), ver [`PROCESSES.md`](PROCESSES.md).
 
 ---
 
