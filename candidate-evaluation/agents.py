@@ -274,6 +274,9 @@ def create_candidate_matching_agent(user_id: str = None, client_id: str = None):
     # Seleccionar la herramienta correcta según si hay filtros
     candidates_tool = get_candidates_by_recruiter if user_id and client_id else get_candidates_data
 
+    matching_agent_kwargs = dict(common_agent_kwargs)
+    matching_agent_kwargs["max_iter"] = 2
+
     return Agent(
         role="Candidate Matching Specialist",
         goal="Realizar matcheo inteligente entre candidatos (tech_stack) y entrevistas (job_description) para encontrar las mejores coincidencias",
@@ -290,13 +293,21 @@ def create_candidate_matching_agent(user_id: str = None, client_id: str = None):
         - Análisis de gaps y fortalezas técnicas
         - Generación de reportes de compatibilidad detallados
         
-        **PROCESO DE MATCHING:**
-        1. Obtener candidatos (tech_stack: array) y entrevistas (job_description: string)
-        2. Comparar cada tecnología del tech_stack con el job_description (case-insensitive, considerar variaciones: React=ReactJS, JavaScript=JS)
-        3. Si hay al menos una coincidencia, calcular score > 0
-        4. Generar ranking de matches
-        
-        **SCORING:** Coincidencias exactas (40%), relacionadas (30%), complementarias (20%), gaps críticos (-10%)
+        **PROTOCOLO POR ORACIONES (para explicar el match, no para excluir):**
+        - Usá oraciones/viñetas del job_description para **fundamentar** match_analysis y priorizar evidencia clara.
+        - **No** dejes fuera un candidato válido solo porque no encontraste una oración ideal: si el tech_stack del candidato
+          y el de la JD (o el texto del JD) muestran coincidencia bajo las reglas inclusivas, **incluí el match**.
+        - Si el JD es escueto o genérico, igual aplicá las reglas de variaciones (React/ReactJS, JS/JavaScript, etc.).
+        - No inventes texto: solo datos reales de las herramientas.
+
+        **PROCESO DE MATCHING (resumen):**
+        1. Obtener candidatos (tech_stack: array) y entrevistas (job_description, tech_stack de la JD)
+        2. Aplicar el protocolo por oraciones; luego comparar skills con requisitos (case-insensitive, variaciones)
+        3. Si hay al menos una coincidencia técnica razonable, calcular tech_stack_score > 0
+        4. Score final: si hay tech > 0, no dejar que observations bajen ese valor (max(blend suave, tech)); sin observations, final = tech
+        5. Generar ranking de matches
+
+        **SCORING (suave):** prioridad al tech; blend ~82% tech + 18% observations con piso = tech cuando tech > 0; gaps como mucho -5%; mínimo ~22% si hay alguna coincidencia
         
         **ENFOQUE INCLUSIVO:**
         - SER GENEROSO en el matching: incluir candidatos con coincidencias parciales o relacionadas
@@ -317,7 +328,7 @@ def create_candidate_matching_agent(user_id: str = None, client_id: str = None):
         
         **TL;DR:** Análisis conciso. Solo scores y matches esenciales. Sin texto innecesario.""",
         tools=[candidates_tool, get_all_jd_interviews, get_existing_meets_candidates],
-        **common_agent_kwargs,
+        **matching_agent_kwargs,
         llm=MATCHING_LLM,  # Usar LLM específico para matching con temperature=0
     )
 

@@ -1527,6 +1527,130 @@ def get_candidates_data(limit: int | dict | None = 100) -> str:
         return json.dumps({"error": f"Error obteniendo datos de candidates: {str(e)}"}, indent=2)
 
 
+def log_matching_inputs_debug(
+    user_id: str | None = None,
+    client_id: str | None = None,
+    job_description_preview_chars: int = 400,
+) -> None:
+    """
+    Diagnóstico: imprime candidatos con tech_stack y JD (búsquedas) con los campos usados en el matching.
+    Desactivar con env MATCHING_DEBUG_INPUTS=0 si no se quieren logs en consola.
+    """
+    flag = os.getenv("MATCHING_DEBUG_INPUTS", "1").strip().lower()
+    if flag in ("0", "false", "no", "off"):
+        return
+
+    try:
+        url = os.getenv("SUPABASE_URL")
+        key = os.getenv("SUPABASE_KEY")
+        if not url or not key:
+            print("[MATCHING INPUT LOG] ⚠️ SUPABASE_URL/SUPABASE_KEY no configurados, skip log")
+            return
+
+        supabase = create_client(url, key)
+        candidates_out: list[dict[str, Any]] = []
+
+        if user_id and client_id:
+            print(
+                f"\n{'=' * 72}\n[MATCHING INPUT LOG] Filtros: user_id={user_id} client_id={client_id}\n"
+                f"  Fuente candidatos: candidate_recruiters → candidates (mismo criterio que get_candidates_by_recruiter)\n"
+                f"{'=' * 72}"
+            )
+            recruiter_response = (
+                supabase.table("candidate_recruiters")
+                .select("candidate_id")
+                .eq("user_id", user_id)
+                .eq("client_id", client_id)
+                .execute()
+            )
+            candidate_ids = [
+                row.get("candidate_id") for row in (recruiter_response.data or []) if row.get("candidate_id")
+            ]
+            if candidate_ids:
+                cand_resp = supabase.table("candidates").select("*").in_("id", candidate_ids).execute()
+                for row in cand_resp.data or []:
+                    candidates_out.append(
+                        {
+                            "id": row.get("id"),
+                            "name": row.get("name"),
+                            "email": row.get("email"),
+                            "tech_stack": row.get("tech_stack"),
+                            "has_observations": bool(row.get("observations")),
+                        }
+                    )
+        else:
+            print(
+                f"\n{'=' * 72}\n[MATCHING INPUT LOG] Sin user_id/client_id — todos los candidatos (limit 1000)\n"
+                f"  Fuente: tabla candidates (mismo criterio que get_candidates_data)\n"
+                f"{'=' * 72}"
+            )
+            response = supabase.table("candidates").select("*").limit(1000).execute()
+            for row in response.data or []:
+                candidates_out.append(
+                    {
+                        "id": row.get("id"),
+                        "name": row.get("name"),
+                        "email": row.get("email"),
+                        "tech_stack": row.get("tech_stack"),
+                        "has_observations": bool(row.get("observations")),
+                    }
+                )
+
+        print(f"\n--- CANDIDATOS ({len(candidates_out)}) — matching usa: tech_stack[], observations (si existe) ---")
+        for i, c in enumerate(candidates_out, 1):
+            ts = c.get("tech_stack")
+            ts_str = json.dumps(ts, ensure_ascii=False) if ts is not None else "null"
+            obs = "sí" if c.get("has_observations") else "no"
+            print(
+                f"  [{i}] id={c.get('id')} | {c.get('name')} | {c.get('email')}\n"
+                f"      tech_stack: {ts_str}\n"
+                f"      observations: {obs}"
+            )
+
+        # JD / búsquedas (status active)
+        if client_id:
+            jd_resp = (
+                supabase.table("jd_interviews")
+                .select("*")
+                .eq("client_id", client_id)
+                .eq("status", "active")
+                .execute()
+            )
+            print(f"\n--- BÚSQUEDAS / JD (cliente {client_id}, status=active) — matching usa: tech_stack, job_description ---")
+        else:
+            jd_resp = supabase.table("jd_interviews").select("*").eq("status", "active").execute()
+            print("\n--- BÚSQUEDAS / JD (todas activas) — matching usa: tech_stack, job_description ---")
+
+        jd_rows = jd_resp.data or []
+        for i, row in enumerate(jd_rows, 1):
+            jd_id = row.get("id")
+            name = row.get("interview_name")
+            agent = row.get("agent_id")
+            ts = row.get("tech_stack")
+            jd_text = row.get("job_description") or ""
+            preview = jd_text[:job_description_preview_chars]
+            if len(jd_text) > job_description_preview_chars:
+                preview += "…"
+            ts_display = ts if ts is not None and str(ts).strip() != "" else "(vacío → el modelo usa job_description)"
+            print(
+                f"  [{i}] id={jd_id} | {name}\n"
+                f"      agent_id: {agent}\n"
+                f"      tech_stack (string/CSV en BD): {ts_display}\n"
+                f"      job_description (preview {job_description_preview_chars} chars):\n"
+                f"      {preview!r}"
+            )
+
+        print(f"\n{'=' * 72}[MATCHING INPUT LOG] Fin ({len(candidates_out)} candidatos, {len(jd_rows)} JDs)\n{'=' * 72}\n")
+
+        evaluation_logger.log_task_progress(
+            "Matching input log",
+            f"candidatos={len(candidates_out)}, jd_interviews={len(jd_rows)}",
+        )
+    except Exception as e:
+        print(f"[MATCHING INPUT LOG] ⚠️ Error generando log: {e}")
+        evaluation_logger.log_error("Matching input log", str(e))
+
+
 @tool
 def create_candidate(
     name: str,
