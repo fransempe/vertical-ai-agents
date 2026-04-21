@@ -11,14 +11,14 @@ pytest.importorskip("docx")
 
 @pytest.fixture(autouse=True)
 def _s3_bucket_name_for_tests(monkeypatch):
-    monkeypatch.setenv("S3_BUCKET_NAME", "test-bucket")
+    monkeypatch.setenv("AWS_BUCKET_NAME", "test-bucket")
 
 
 def test_get_s3_bucket_name_requires_env(monkeypatch):
     from tools import cv_tools
 
-    monkeypatch.delenv("S3_BUCKET_NAME", raising=False)
-    with pytest.raises(ValueError, match="S3_BUCKET_NAME"):
+    monkeypatch.delenv("AWS_BUCKET_NAME", raising=False)
+    with pytest.raises(ValueError, match="AWS_BUCKET_NAME"):
         cv_tools.get_s3_bucket_name()
 
 
