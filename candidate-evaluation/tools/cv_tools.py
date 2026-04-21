@@ -17,10 +17,22 @@ from utils.logger import evaluation_logger
 
 load_dotenv()
 
-# Configuración de AWS S3
-S3_BUCKET = "hhrr-ai-multiagents"
-S3_REGION = "us-east-1"
 S3_PREFIX = "cvs/"
+
+
+def get_s3_bucket_name() -> str:
+    """Bucket donde están los CV (misma variable que en backoffice: S3_BUCKET_NAME)."""
+    b = (os.getenv("S3_BUCKET_NAME") or "").strip()
+    if not b:
+        raise ValueError(
+            "S3_BUCKET_NAME is not set in environment variables. "
+            "Set it in .env to match the S3 bucket used for CV uploads."
+        )
+    return b
+
+
+def get_s3_region() -> str:
+    return (os.getenv("S3_REGION") or os.getenv("AWS_REGION") or "us-east-1").strip() or "us-east-1"
 
 
 def _get_s3_client():
@@ -29,7 +41,7 @@ def _get_s3_client():
     """
     aws_access_key_id = os.getenv("AWS_ACCESS_KEY_ID")
     aws_secret_access_key = os.getenv("AWS_SECRET_ACCESS_KEY")
-    aws_region = os.getenv("AWS_REGION", S3_REGION)
+    aws_region = get_s3_region()
 
     if not aws_access_key_id:
         raise ValueError("AWS_ACCESS_KEY_ID not found in environment variables. Please set it in .env file")
@@ -65,7 +77,7 @@ def _extract_text_from_pdf_with_textract(file_content: bytes) -> str:
     try:
         aws_access_key_id = os.getenv("AWS_ACCESS_KEY_ID")
         aws_secret_access_key = os.getenv("AWS_SECRET_ACCESS_KEY")
-        aws_region = os.getenv("AWS_REGION", S3_REGION)
+        aws_region = get_s3_region()
 
         textract = boto3.client(
             "textract",
@@ -269,6 +281,7 @@ def download_cv_from_s3(filename: str) -> str:
         JSON string con el contenido del CV y metadata
     """
     try:
+        bucket = get_s3_bucket_name()
         # Agregar el prefijo 'cvs/' al filename si no lo tiene
         s3_key = filename if filename.startswith(S3_PREFIX) else f"{S3_PREFIX}{filename}"
 
@@ -277,17 +290,17 @@ def download_cv_from_s3(filename: str) -> str:
 
         # Primero verificar que el archivo existe
         try:
-            s3_client.head_object(Bucket=S3_BUCKET, Key=s3_key)
+            s3_client.head_object(Bucket=bucket, Key=s3_key)
         except s3_client.exceptions.NoSuchKey:
             raise FileNotFoundError(
-                f"El archivo '{s3_key}' no existe en el bucket '{S3_BUCKET}'. "
+                f"El archivo '{s3_key}' no existe en el bucket '{bucket}'. "
                 f"Verifica que el archivo esté en la ubicación correcta."
             )
         except Exception as e:
             raise Exception(f"Error verificando objeto en S3: {str(e)}")
 
         # Descargar archivo
-        response = s3_client.get_object(Bucket=S3_BUCKET, Key=s3_key)
+        response = s3_client.get_object(Bucket=bucket, Key=s3_key)
         file_content = response["Body"].read()
 
         if len(file_content) == 0:
@@ -311,7 +324,7 @@ def download_cv_from_s3(filename: str) -> str:
                 "success": True,
                 "filename": filename,
                 "s3_key": s3_key,
-                "bucket": S3_BUCKET,
+                "bucket": bucket,
                 "file_type": file_extension,
                 "text_content": text_content,
                 "content_length": len(text_content),
@@ -328,7 +341,7 @@ def download_cv_from_s3(filename: str) -> str:
                 "error": f"File not found: {str(e)}",
                 "error_type": "FileNotFoundError",
                 "filename": filename,
-                "s3_bucket": S3_BUCKET,
+                "s3_bucket": bucket if "bucket" in locals() else None,
                 "s3_key": s3_key if "s3_key" in locals() else f"{S3_PREFIX}{filename}",
             },
             indent=2,
@@ -344,10 +357,10 @@ def download_cv_from_s3(filename: str) -> str:
             return json.dumps(
                 {
                     "success": False,
-                    "error": f"Bucket '{S3_BUCKET}' not found. Verify the bucket name and your AWS permissions.",
+                    "error": f"Bucket '{bucket}' not found. Verify the bucket name and your AWS permissions.",
                     "error_type": "NoSuchBucket",
                     "filename": filename,
-                    "s3_bucket": S3_BUCKET,
+                    "s3_bucket": bucket,
                 },
                 indent=2,
             )
@@ -370,7 +383,7 @@ def download_cv_from_s3(filename: str) -> str:
         elif "SignatureDoesNotMatch" in error_message:
             error_detail = "Invalid Secret Key. Verifica que AWS_SECRET_ACCESS_KEY sea correcto en el archivo .env"
         elif "NoSuchKey" in error_message:
-            error_detail = f"El archivo no existe en S3. Ruta completa: s3://{S3_BUCKET}/{s3_key if 's3_key' in locals() else filename}"
+            error_detail = f"El archivo no existe en S3. Ruta completa: s3://{bucket}/{s3_key if 's3_key' in locals() else filename}"
         else:
             error_detail = error_message
 
@@ -380,8 +393,8 @@ def download_cv_from_s3(filename: str) -> str:
                 "error": error_detail,
                 "error_type": error_type,
                 "filename": filename,
-                "s3_bucket": S3_BUCKET,
-                "s3_region": S3_REGION,
+                "s3_bucket": bucket if "bucket" in locals() else None,
+                "s3_region": get_s3_region(),
             },
             indent=2,
             ensure_ascii=False,
