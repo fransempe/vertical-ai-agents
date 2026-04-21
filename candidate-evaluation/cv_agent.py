@@ -23,10 +23,14 @@ def create_cv_analyzer_agent():
     """
     Crea el agente analizador de CVs
     """
+    bucket_name = (os.getenv("S3_BUCKET_NAME") or "").strip() or "<S3_BUCKET_NAME>"
+    region = (os.getenv("S3_REGION") or os.getenv("AWS_REGION") or "us-east-1").strip()
+    cv_url_base = f"https://{bucket_name}.s3.{region}.amazonaws.com/cvs"
+
     return Agent(
         role="CV Analysis Specialist",
         goal="Analizar CVs en formato PDF o DOC desde S3 y extraer información estructurada del candidato",
-        backstory="""Eres un especialista experto en análisis de currículums vitae con más de 10 años de experiencia 
+        backstory=f"""Eres un especialista experto en análisis de currículums vitae con más de 10 años de experiencia 
         en recursos humanos y reclutamiento técnico.
         
         Tu especialidad es leer y analizar CVs de candidatos para extraer información clave de manera precisa y estructurada.
@@ -79,8 +83,8 @@ def create_cv_analyzer_agent():
         - Nunca inventas datos si no se pudieron extraer del CV
 
         REGLAS PARA cv_url:
-        - Construye la URL del CV con el formato fijo: "https://hhrr-ai-multiagents.s3.us-east-1.amazonaws.com/cvs/{filename}"
-        - Ejemplo: para archivo "cv_juan.pdf" → "https://hhrr-ai-multiagents.s3.us-east-1.amazonaws.com/cvs/cv_juan.pdf"
+        - Construye la URL del CV con el bucket y región configurados en el entorno (S3_BUCKET_NAME, S3_REGION): "{cv_url_base}/{{nombre_archivo}}"
+        - Ejemplo: para archivo "cv_juan.pdf" → "{cv_url_base}/cv_juan.pdf"
         """,
         tools=[download_cv_from_s3, extract_candidate_data, create_candidate],
         verbose=True,
