@@ -95,7 +95,7 @@ Configura todo lo que vayas a usar en local; si un endpoint pide variables que n
 
 | Variable | Rol |
 |----------|-----|
-| `S3_BUCKET_NAME` | Bucket de CVs (descarga en `tools/cv_tools.py`; alinear con backoffice) |
+| `AWS_BUCKET_NAME` | Bucket de CVs (descarga en `tools/cv_tools.py`) |
 | `S3_REGION` | Región del bucket (si no está, se usa `AWS_REGION`, por defecto `us-east-1`) |
 | `AWS_REGION` | Región AWS para S3/Textract si no definís `S3_REGION` |
 | `AWS_S3_URL` | URLs o prefijos de bucket para CV (`cv_agent.py`, opcional) |

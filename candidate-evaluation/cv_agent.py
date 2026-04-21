@@ -23,7 +23,7 @@ def create_cv_analyzer_agent():
     """
     Crea el agente analizador de CVs
     """
-    bucket_name = (os.getenv("S3_BUCKET_NAME") or "").strip() or "<S3_BUCKET_NAME>"
+    bucket_name = (os.getenv("AWS_BUCKET_NAME") or "").strip() or "<AWS_BUCKET_NAME>"
     region = (os.getenv("S3_REGION") or os.getenv("AWS_REGION") or "us-east-1").strip()
     cv_url_base = f"https://{bucket_name}.s3.{region}.amazonaws.com/cvs"
 
@@ -83,7 +83,7 @@ def create_cv_analyzer_agent():
         - Nunca inventas datos si no se pudieron extraer del CV
 
         REGLAS PARA cv_url:
-        - Construye la URL del CV con el bucket y región configurados en el entorno (S3_BUCKET_NAME, S3_REGION): "{cv_url_base}/{{nombre_archivo}}"
+        - Construye la URL del CV con el bucket y región configurados en el entorno (AWS_BUCKET_NAME, S3_REGION): "{cv_url_base}/{{nombre_archivo}}"
         - Ejemplo: para archivo "cv_juan.pdf" → "{cv_url_base}/cv_juan.pdf"
         """,
         tools=[download_cv_from_s3, extract_candidate_data, create_candidate],

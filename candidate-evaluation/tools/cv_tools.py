@@ -21,11 +21,11 @@ S3_PREFIX = "cvs/"
 
 
 def get_s3_bucket_name() -> str:
-    """Bucket donde están los CV (misma variable que en backoffice: S3_BUCKET_NAME)."""
-    b = (os.getenv("S3_BUCKET_NAME") or "").strip()
+    """Bucket donde están los CV (`AWS_BUCKET_NAME`)."""
+    b = (os.getenv("AWS_BUCKET_NAME") or "").strip()
     if not b:
         raise ValueError(
-            "S3_BUCKET_NAME is not set in environment variables. "
+            "AWS_BUCKET_NAME is not set in environment variables. "
             "Set it in .env to match the S3 bucket used for CV uploads."
         )
     return b
