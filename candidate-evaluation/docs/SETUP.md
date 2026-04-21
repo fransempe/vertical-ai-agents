@@ -95,8 +95,10 @@ Configura todo lo que vayas a usar en local; si un endpoint pide variables que n
 
 | Variable | Rol |
 |----------|-----|
-| `AWS_REGION` | Región S3 (hay valores por defecto en herramientas si aplica) |
-| `AWS_S3_URL` | URLs o prefijos de bucket para CV (`cv_agent.py`) |
+| `S3_BUCKET_NAME` | Bucket de CVs (descarga en `tools/cv_tools.py`; alinear con backoffice) |
+| `S3_REGION` | Región del bucket (si no está, se usa `AWS_REGION`, por defecto `us-east-1`) |
+| `AWS_REGION` | Región AWS para S3/Textract si no definís `S3_REGION` |
+| `AWS_S3_URL` | URLs o prefijos de bucket para CV (`cv_agent.py`, opcional) |
 | `EMAIL_API_URL` | URL del servicio de envío de email (por defecto en código suele apuntar a `http://127.0.0.1:8004/send-simple-email` donde aplique) |
 | `REPORT_TO_EMAIL` | Destino de reportes cuando el flujo lo usa |
 | `GRAPH_TENANT_ID`, `GRAPH_CLIENT_ID`, `GRAPH_CLIENT_SECRET`, `GRAPH_SCOPE`, `GRAPH_BASE`, `OUTLOOK_USER_ID` | Microsoft Graph / Outlook (`tools/email_tools.py`) |

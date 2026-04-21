@@ -3,6 +3,8 @@
 Crew independiente para procesamiento de CVs
 """
 
+import os
+
 from crewai import Crew, Task
 
 from cv_agent import create_cv_analyzer_agent
@@ -21,13 +23,17 @@ def create_cv_analysis_crew(filename: str, user_id: str = None, client_id: str =
     Returns:
         Crew configurado para análisis de CV
     """
+    bucket_name = (os.getenv("S3_BUCKET_NAME") or "").strip() or "YOUR_BUCKET"
+    region = (os.getenv("S3_REGION") or os.getenv("AWS_REGION") or "us-east-1").strip()
+    cv_url_base = f"https://{bucket_name}.s3.{region}.amazonaws.com/cvs"
+
     # Crear agente
     cv_analyzer = create_cv_analyzer_agent()
 
     # Definir tarea
     analyze_task = Task(
         description=f"""
-        Analiza el CV del archivo '{filename}' que está almacenado en el bucket S3 'hhrr-ai-multiagents/cvs'.
+        Analiza el CV del archivo '{filename}' que está almacenado en el bucket S3 '{bucket_name}/cvs'.
         
         Pasos a seguir:
         1. Descarga el CV desde S3 usando la herramienta download_cv_from_s3 con el nombre de archivo: {filename}
@@ -98,7 +104,7 @@ def create_cv_analysis_crew(filename: str, user_id: str = None, client_id: str =
         7. Crea o actualiza el candidato en la tabla 'candidates' usando la herramienta create_candidate, con los campos:
            - name, email, phone, linkedin (si está disponible), tech_stack (array)
            - observations: El JSON string con toda la información adicional extraída (debe ser un JSON válido)
-           - cv_url: Construir como "https://hhrr-ai-multiagents.s3.us-east-1.amazonaws.com/cvs/{filename}"
+           - cv_url: Construir como "{cv_url_base}/{filename}"
            {f" - user_id: {user_id}, client_id: {client_id} (IMPORTANTE: incluir estos parámetros si están disponibles)" if user_id and client_id else ""}
         8. Confirma el resultado del upsert devolviendo el ID o el registro creado
         
