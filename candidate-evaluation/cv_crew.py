@@ -23,7 +23,7 @@ def create_cv_analysis_crew(filename: str, user_id: str = None, client_id: str =
     Returns:
         Crew configurado para análisis de CV
     """
-    bucket_name = (os.getenv("S3_BUCKET_NAME") or "").strip() or "YOUR_BUCKET"
+    bucket_name = (os.getenv("AWS_BUCKET_NAME") or "").strip() or "YOUR_BUCKET"
     region = (os.getenv("S3_REGION") or os.getenv("AWS_REGION") or "us-east-1").strip()
     cv_url_base = f"https://{bucket_name}.s3.{region}.amazonaws.com/cvs"
 
