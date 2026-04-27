@@ -14,6 +14,7 @@ from api import (  # noqa: E402
     MatchingRequest,
     SingleMeetRequest,
     b64decode,
+    format_english_assessment,
     format_soft_skills,
     format_technical_questions,
     load_email_template,
@@ -50,6 +51,26 @@ def test_format_technical_questions():
     )
     assert "Q1?" in out
     assert "Contestada" in out
+
+
+def test_format_english_assessment():
+    assert format_english_assessment({}) == "No disponible"
+    out = format_english_assessment(
+        {
+            "cefr_level": "B2",
+            "fluency": "Buena fluidez",
+            "evidence": [
+                {
+                    "question": "Can you tell me about yourself and your experience?",
+                    "answer": "I have five years of experience.",
+                    "evaluation": "Respuesta clara",
+                }
+            ],
+        }
+    )
+    assert "B2" in out
+    assert "Buena fluidez" in out
+    assert "Can you tell me" in out
 
 
 def test_b64decode_padding():
@@ -112,6 +133,7 @@ def test_load_and_render_evaluation_match_template():
         "knowledge_level": "Medio",
         "practical_experience": "2y",
         "technical_questions_formatted": "—",
+        "english_assessment_formatted": "Nivel B2",
         "justification": "Porque sí",
         "conversation_text": "(vacío)",
         "client_name": "ACME",

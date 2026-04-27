@@ -51,11 +51,18 @@ def create_analysis_task(agent, extraction_task):
         - Evaluación breve (1-2 líneas)
         Resumen: Total [X], Completas [X], Parciales [X], No contestadas [X]. Si hay no contestadas → ALERTA con lista.
 
-        **5. PERSONALIDAD:** Confianza, profesionalismo, actitud positiva, motivación (puntaje 0-10 + comentario breve cada uno).
+        **5. EVALUACIÓN DE INGLÉS:**
+        Identificar las respuestas del candidato a estas preguntas, si existen en conversation_data:
+        - "Can you tell me about yourself and your experience?"
+        - "Can you describe a challenging project you worked on and how you solved the problems?"
+        Evaluar comprensión, fluidez, vocabulario, gramática, claridad y coherencia. Estimar nivel CEFR (A1/A2/B1/B2/C1/C2) con justificación breve.
+        Si no hay respuestas en inglés, indicar "No hay evidencia suficiente".
 
-        **6. CONVERSACIÓN:** Sentimiento predominante, temas clave (lista), engagement (Bajo/Medio/Alto), calidad de respuestas (breve).
+        **6. PERSONALIDAD:** Confianza, profesionalismo, actitud positiva, motivación (puntaje 0-10 + comentario breve cada uno).
 
-        **7. EVALUACIÓN FINAL:**
+        **7. CONVERSACIÓN:** Sentimiento predominante, temas clave (lista), engagement (Bajo/Medio/Alto), calidad de respuestas (breve).
+
+        **8. EVALUACIÓN FINAL:**
         - Resumen ejecutivo (2-3 líneas)
         - Fortalezas principales (lista 3-5)
         - Áreas de mejora (lista 2-3)
@@ -68,6 +75,7 @@ def create_analysis_task(agent, extraction_task):
           "overall_assessment": {"general_score": 0-10, "recommendation": "Recomendado/Condicional/No Recomendado", "confidence_level": "Alta/Media/Baja"},
           "soft_skills": {"communication": 0-10, "leadership": 0-10, "teamwork": 0-10, "adaptability": 0-10, "problem_solving": 0-10, "time_management": 0-10, "emotional_intelligence": 0-10, "continuous_learning": 0-10},
           "technical_assessment": {"technical_score": 0-10, "knowledge_depth": "Básico/Intermedio/Avanzado/Experto", "practical_experience": "Limitada/Moderada/Amplia/Extensa", "technical_questions": [{"question": "texto exacto", "answered": "SÍ/NO/PARCIALMENTE", "answer": "respuesta exacta", "evaluation": "breve"}]},
+          "english_assessment": {"cefr_level": "A1/A2/B1/B2/C1/C2/No disponible", "fluency": "string", "vocabulary": "string", "grammar": "string", "comprehension": "string", "clarity": "string", "evidence": [{"question": "texto exacto", "answer": "respuesta exacta", "evaluation": "breve"}], "summary": "string"},
           "personality_traits": {"confidence": 0-10, "professionalism": 0-10, "positive_attitude": 0-10, "motivation": 0-10},
           "conversation_analysis": {"predominant_sentiment": "string", "key_topics": ["topic1"], "engagement_level": "Bajo/Medio/Alto", "response_quality": "string"},
           "detailed_insights": {"strengths": ["s1", "s2"], "weaknesses": ["w1"], "standout_moments": ["m1"], "concerns": ["c1"]},
@@ -257,6 +265,13 @@ def create_processing_task(agent, extraction_task, analysis_task, job_analysis_t
         - Profundidad de Conocimiento: [Básico/Intermedio/Avanzado/Experto]
         - Experiencia Práctica: [Limitada/Moderada/Amplia/Extensa]
 
+        Evaluación de Inglés:
+        - Nivel estimado: [A1/A2/B1/B2/C1/C2/No disponible]
+        - Fluidez: [ANÁLISIS]
+        - Vocabulario y gramática: [ANÁLISIS]
+        - Comprensión y claridad: [ANÁLISIS]
+        - Evidencia: [RESUMEN_DE_RESPUESTAS_EN_INGLÉS]
+
         Análisis de la Conversación:
         - Sentimiento Predominante: [SENTIMIENTO] (colocar el sentimiento predominante de la conversación)
         - Temas Clave: [LISTA_TEMAS] (colocar la lista de temas clave de la conversación)
@@ -276,7 +291,7 @@ def create_processing_task(agent, extraction_task, analysis_task, job_analysis_t
         - Próximos Pasos: [RECOMENDACIONES_PRÓXIMOS_PASOS] (colocar las recomendaciones próximos pasos de la recomendación final)
 
         Atentamente,
-        Clara - AI Recruiter
+        Mauricio - AI Recruiter
         ```
 
         La respuesta debe incluir AMBOS reportes: el JSON completo y el reporte formateado.
@@ -353,6 +368,13 @@ def create_email_sending_task(agent, processing_task):
         📖 Experiencia Práctica: [ANÁLISIS_CUALITATIVO_EXPERIENCIA]
         💼 Capacidad de Explicación: [ANÁLISIS_CUALITATIVO_EXPLICACIÓN]
 
+        🌐 **EVALUACIÓN DE INGLÉS**
+        🗣️ Nivel estimado: [A1/A2/B1/B2/C1/C2/No disponible]
+        💬 Fluidez: [ANÁLISIS_DE_FLUIDEZ]
+        📚 Vocabulario y gramática: [ANÁLISIS_DE_VOCABULARIO_Y_GRAMÁTICA]
+        🎧 Comprensión y claridad: [ANÁLISIS_DE_COMPRENSIÓN_Y_CLARIDAD]
+        🧾 Evidencia: [RESUMEN_DE_RESPUESTAS_A_LAS_PREGUNTAS_EN_INGLÉS]
+
         💭 **ANÁLISIS DE LA CONVERSACIÓN**
         😊 Sentimiento Predominante: [SENTIMIENTO]
         🏷️ Temas Clave: [LISTA_TEMAS]
@@ -385,7 +407,7 @@ def create_email_sending_task(agent, processing_task):
         🚀 Próximos Pasos: [RECOMENDACIONES_PRÓXIMOS_PASOS]
 
         🙏 Atentamente,
-        👨‍💼 Clara - AI Recruiter
+        👨‍💼 Mauricio - AI Recruiter
 
         🔄 [Si hay múltiples candidatos, repetir este formato para cada uno]
         
@@ -1018,19 +1040,28 @@ def create_elevenlabs_prompt_generation_task(agent, interview_name: str, job_des
                 - Realizar 3 (TRES) preguntas técnicas específicas basadas en la descripción del puesto y el stack tecnológico requerido.
                 - Las preguntas deben estar directamente relacionadas con las tecnologías, herramientas y conocimientos técnicos mencionados en la JD.
              
-             4. **REGLAS IMPORTANTES:**
+             4. **2 PREGUNTAS EN INGLÉS PARA EVALUAR IDIOMA:**
+                - Al terminar las 3 preguntas técnicas, el agente debe avisar claramente que va a cambiar a inglés para evaluar el nivel de idioma.
+                - Debe decir algo similar a: "Ahora vamos a cambiar a inglés para hacer dos preguntas breves y evaluar tu nivel de idioma."
+                - Debe realizar EXACTAMENTE estas 2 preguntas en inglés, en este orden, una a la vez:
+                  1. "Can you tell me about yourself and your experience?"
+                  2. "Can you describe a challenging project you worked on and how you solved the problems?"
+                - Debe pedir que el candidato responda en inglés y mantener esta parte de la entrevista en inglés.
+             
+             5. **REGLAS IMPORTANTES:**
                 - NO hagas más de 1 pregunta sobre la experiencia del candidato.
                 - NO hagas más de 1 pregunta de habilidades blandas.
                 - NO hagas más de 3 preguntas técnicas.
-                - En total deben ser exactamente 5 preguntas (1 experiencia, 1 soft skill, 3 técnicas).
-                - Al finalizar las 5 preguntas, el agente debe agradecer al candidato y cerrar la entrevista de forma cordial.
+                - NO hagas más de 2 preguntas en inglés y usa exactamente las dos preguntas indicadas.
+                - En total deben ser exactamente 7 preguntas evaluativas (1 experiencia, 1 soft skill, 3 técnicas, 2 inglés).
+                - Al finalizar las 7 preguntas evaluativas, el agente debe agradecer al candidato y cerrar la entrevista de forma cordial.
                 - Siempre que alguna información proviniente de `get-candidate-info` no esté disponible en el JSON (por ejemplo `responsibilities` o `experiencia`), el agente debe **continuar normalmente** sin bloquearse, haciendo preguntas más generales sin depender de esos campos.
         
         3. El prompt debe:
            - Estar en español
            - Ser conciso pero completo
            - Incluir las reglas anteriores sobre la cantidad y tipo de preguntas
-           - Enfocarse en definir el rol, el contexto del entrevistador y la estructura de la entrevista (5 preguntas en total)
+           - Enfocarse en definir el rol, el contexto del entrevistador y la estructura de la entrevista (7 preguntas evaluativas en total)
         
         **INSTRUCCIONES PARA EXTRACCIÓN DE DATOS DEL CLIENTE:**
         Extrae los siguientes datos del cliente desde la descripción del puesto (busca en el formato "Cliente: X - Responsable: Y - Teléfono: Z"):
@@ -1136,6 +1167,14 @@ def create_single_meet_evaluation_task(agent, extraction_task):
           * Evaluar calidad técnica de cada respuesta
           * Crear resumen: [X/Y completamente contestadas, X/Y parcialmente, X/Y no contestadas]
           * Si hay preguntas sin contestar, generar ALERTA CRÍTICA
+
+        ### Evaluación de Inglés - Análisis de Idioma:
+        - Identificar las respuestas del candidato a estas preguntas, si aparecen en conversation_data:
+          * "Can you tell me about yourself and your experience?"
+          * "Can you describe a challenging project you worked on and how you solved the problems?"
+        - Evaluar comprensión, fluidez, vocabulario, gramática, claridad y coherencia.
+        - Estimar un nivel CEFR (A1/A2/B1/B2/C1/C2) con justificación basada únicamente en evidencia real.
+        - Si el candidato no respondió en inglés o no hay evidencia suficiente, indicarlo explícitamente.
         
         ## 2. 📋 **ANÁLISIS DE LA JD**
         Analizar la job_description del JD interview asociado:
@@ -1231,6 +1270,22 @@ def create_single_meet_evaluation_task(agent, extraction_task):
               }},
               "alerts": ["alertas críticas si las hay"]
             }},
+            "english_assessment": {{
+              "cefr_level": "A1/A2/B1/B2/C1/C2/No disponible",
+              "fluency": "análisis de fluidez basado en las respuestas en inglés",
+              "vocabulary": "análisis de vocabulario",
+              "grammar": "análisis de gramática",
+              "comprehension": "análisis de comprensión",
+              "clarity": "análisis de claridad y coherencia",
+              "evidence": [
+                {{
+                  "question": "texto exacto de la pregunta en inglés",
+                  "answer": "respuesta exacta del candidato",
+                  "evaluation": "análisis breve de la respuesta"
+                }}
+              ],
+              "summary": "evaluación general del nivel de inglés"
+            }},
             "emotion_sentiment_summary": {{
               "prosody_summary_text": "Resumen interpretativo del tono no lingüístico (solo si hay datos de emotion_analysis)",
               "burst_summary_text": "Resumen interpretativo de las expresiones (solo si hay datos de emotion_analysis)",
@@ -1292,12 +1347,17 @@ def create_single_meet_evaluation_task(agent, extraction_task):
            - NO inventes preguntas o respuestas que no estén en los datos
            - Si no hay preguntas técnicas en la conversación, indica: "No se encontraron preguntas técnicas en la conversación"
         
-        5. **PARA EVALUACIÓN DE MATCH:**
+        5. **PARA EVALUACIÓN DE INGLÉS:**
+           - Analiza SOLO respuestas reales a preguntas en inglés presentes en conversation_data
+           - NO inventes nivel de idioma si no hay evidencia suficiente
+           - Si no hay respuestas en inglés, indica: "No hay evidencia suficiente para evaluar el nivel de inglés"
+        
+        6. **PARA EVALUACIÓN DE MATCH:**
            - Compara SOLO lo que está en los datos reales
            - NO inventes tecnologías, proyectos o experiencias del candidato
            - NO inventes requisitos de la JD que no estén en job_description
         
-        6. **PARA ANÁLISIS DE EMOCIONES:**
+        7. **PARA ANÁLISIS DE EMOCIONES:**
            - Si los datos incluyen `emotion_analysis` en `conversation`, DEBES analizarlo
            - Usa los datos de `prosody.summary` y `burst.summary` para identificar emociones predominantes (top 3-5)
            - **CRÍTICO: Genera resúmenes interpretativos de MÍNIMO 3-4 renglones (NO menos) que expliquen detalladamente qué significan las emociones en el contexto de la entrevista**
