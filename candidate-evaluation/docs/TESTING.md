@@ -138,6 +138,8 @@ pytest --cov=. --cov-report=term-missing
 | `conftest.py` | Hooks/fixtures compartidos (placeholder para futuros mocks globales). |
 | `test_helpers.py` | `utils.helpers`: `clean_uuid`, `is_valid_uuid`. |
 | `test_utils_logger.py` | `EvaluationLogger`: llamadas a métodos públicos sin excepción. |
+| `test_audit_log.py` | `utils.audit_log`: feature flag, inserción mockeada en Supabase, sanitización de metadata sensible y eventos de read-cv/evaluación/ElevenLabs/matching. |
+| `test_api_audit_events.py` | `POST /read-cv`, `POST /evaluate-meet`, `POST /create-elevenlabs-agent` y `POST /match-candidates`: emisión de auditoría sin I/O real. |
 | `test_api_formatters.py` | Helpers al inicio de `api.py` (`format_*`, `load/render_email_template`, `b64decode`), modelos Pydantic básicos; **`load_email_template`** con error de lectura genérico; requiere cadena de import con `boto3`. |
 | `test_api_status.py` | `GET /status` con `TestClient`. |
 | `test_api_matching_routes.py` | `GET /match-candidates/{run_id}` (404, `done`, `error`, `queued`); **`POST /match-candidates`** con mock de `do_matching_long_task` o **500** si `Thread.start` falla. |
