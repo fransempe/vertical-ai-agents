@@ -29,7 +29,7 @@ def test_create_analysis_task_has_extraction_context():
     ana_task = create_analysis_task(ana_agent, ext_task)
     assert ana_task.agent is ana_agent
     assert ext_task in ana_task.context
-    assert "Can you tell me about yourself and your experience?" in ana_task.description
+    assert "What is your current role and what are your main responsibilities?" in ana_task.description
     assert "english_assessment" in ana_task.description
 
 
@@ -174,7 +174,7 @@ def test_single_meet_tasks_chain_on_evaluator_agent():
     assert ext_task.agent is agent
     assert eval_task.agent is agent
     assert ext_task in eval_task.context
-    assert "Can you describe a challenging project you worked on and how you solved the problems?" in eval_task.description
+    assert "Can you describe a challenging project you worked on and how you handled it?" in eval_task.description
     assert "english_assessment" in eval_task.description
 
 
@@ -306,5 +306,5 @@ def test_create_elevenlabs_prompt_generation_task_embeds_strings():
     assert name in task.description
     assert jd in task.description
     assert sender in task.description
-    assert "Can you tell me about yourself and your experience?" in task.description
-    assert "7 preguntas evaluativas" in task.description
+    assert "What is your current role and what are your main responsibilities?" in task.description
+    assert "15 a 20 preguntas evaluativas" in task.description

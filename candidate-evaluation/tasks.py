@@ -52,9 +52,12 @@ def create_analysis_task(agent, extraction_task):
         Resumen: Total [X], Completas [X], Parciales [X], No contestadas [X]. Si hay no contestadas → ALERTA con lista.
 
         **5. EVALUACIÓN DE INGLÉS:**
-        Identificar las respuestas del candidato a estas preguntas, si existen en conversation_data:
-        - "Can you tell me about yourself and your experience?"
-        - "Can you describe a challenging project you worked on and how you solved the problems?"
+        Identificar las respuestas del candidato a las 3 preguntas en inglés realizadas, elegidas desde este banco:
+        - "What is your current role and what are your main responsibilities?"
+        - "Can you describe a challenging project you worked on and how you handled it?"
+        - "What has been your biggest professional learning in the last year?"
+        - "What are you expecting from your next professional challenge?"
+        - "Based on the role description, why do you think this position is a good match for you?"
         Evaluar comprensión, fluidez, vocabulario, gramática, claridad y coherencia. Estimar nivel CEFR (A1/A2/B1/B2/C1/C2) con justificación breve.
         Si no hay respuestas en inglés, indicar "No hay evidencia suficiente".
 
@@ -1036,32 +1039,35 @@ def create_elevenlabs_prompt_generation_task(agent, interview_name: str, job_des
              2. **1 PREGUNTA DE HABILIDADES BLANDAS:**
                 - Realizar 1 (UNA) pregunta sobre habilidades blandas del candidato (comunicación, trabajo en equipo, liderazgo, resolución de problemas, adaptabilidad, etc.).
              
-             3. **3 PREGUNTAS TÉCNICAS DEL PUESTO:**
-                - Realizar 3 (TRES) preguntas técnicas específicas basadas en la descripción del puesto y el stack tecnológico requerido.
+             3. **10 A 15 PREGUNTAS TÉCNICAS DEL PUESTO:**
+                - Realizar entre 10 y 15 preguntas técnicas específicas basadas en la descripción del puesto y el stack tecnológico requerido.
                 - Las preguntas deben estar directamente relacionadas con las tecnologías, herramientas y conocimientos técnicos mencionados en la JD.
              
-             4. **2 PREGUNTAS EN INGLÉS PARA EVALUAR IDIOMA:**
-                - Al terminar las 3 preguntas técnicas, el agente debe avisar claramente que va a cambiar a inglés para evaluar el nivel de idioma.
-                - Debe decir algo similar a: "Ahora vamos a cambiar a inglés para hacer dos preguntas breves y evaluar tu nivel de idioma."
-                - Debe realizar EXACTAMENTE estas 2 preguntas en inglés, en este orden, una a la vez:
-                  1. "Can you tell me about yourself and your experience?"
-                  2. "Can you describe a challenging project you worked on and how you solved the problems?"
+             4. **3 PREGUNTAS EN INGLÉS PARA EVALUAR IDIOMA:**
+                - Al terminar las preguntas técnicas, el agente debe avisar claramente que va a cambiar a inglés para evaluar el nivel de idioma.
+                - Debe decir algo similar a: "Ahora vamos a cambiar a inglés para hacer tres preguntas breves y evaluar tu nivel de idioma."
+                - Debe elegir de forma random EXACTAMENTE 3 preguntas del siguiente banco, sin repetir, una a la vez:
+                  1. "What is your current role and what are your main responsibilities?"
+                  2. "Can you describe a challenging project you worked on and how you handled it?"
+                  3. "What has been your biggest professional learning in the last year?"
+                  4. "What are you expecting from your next professional challenge?"
+                  5. "Based on the role description, why do you think this position is a good match for you?"
                 - Debe pedir que el candidato responda en inglés y mantener esta parte de la entrevista en inglés.
              
              5. **REGLAS IMPORTANTES:**
                 - NO hagas más de 1 pregunta sobre la experiencia del candidato.
                 - NO hagas más de 1 pregunta de habilidades blandas.
-                - NO hagas más de 3 preguntas técnicas.
-                - NO hagas más de 2 preguntas en inglés y usa exactamente las dos preguntas indicadas.
-                - En total deben ser exactamente 7 preguntas evaluativas (1 experiencia, 1 soft skill, 3 técnicas, 2 inglés).
-                - Al finalizar las 7 preguntas evaluativas, el agente debe agradecer al candidato y cerrar la entrevista de forma cordial.
+                - Haz como mínimo 10 y como máximo 15 preguntas técnicas. NO hagas menos de 10 ni más de 15.
+                - Hacé EXACTAMENTE 3 preguntas en inglés, elegidas de forma random del banco indicado. NO hagas más ni menos que 3.
+                - En total deben ser entre 15 y 20 preguntas evaluativas (1 experiencia, 1 soft skill, 10 a 15 técnicas, 3 inglés).
+                - Al finalizar las preguntas evaluativas, el agente debe agradecer al candidato y cerrar la entrevista de forma cordial.
                 - Siempre que alguna información proviniente de `get-candidate-info` no esté disponible en el JSON (por ejemplo `responsibilities` o `experiencia`), el agente debe **continuar normalmente** sin bloquearse, haciendo preguntas más generales sin depender de esos campos.
         
         3. El prompt debe:
            - Estar en español
            - Ser conciso pero completo
            - Incluir las reglas anteriores sobre la cantidad y tipo de preguntas
-           - Enfocarse en definir el rol, el contexto del entrevistador y la estructura de la entrevista (7 preguntas evaluativas en total)
+           - Enfocarse en definir el rol, el contexto del entrevistador y la estructura de la entrevista (15 a 20 preguntas evaluativas en total)
         
         **INSTRUCCIONES PARA EXTRACCIÓN DE DATOS DEL CLIENTE:**
         Extrae los siguientes datos del cliente desde la descripción del puesto (busca en el formato "Cliente: X - Responsable: Y - Teléfono: Z"):
@@ -1169,9 +1175,12 @@ def create_single_meet_evaluation_task(agent, extraction_task):
           * Si hay preguntas sin contestar, generar ALERTA CRÍTICA
 
         ### Evaluación de Inglés - Análisis de Idioma:
-        - Identificar las respuestas del candidato a estas preguntas, si aparecen en conversation_data:
-          * "Can you tell me about yourself and your experience?"
-          * "Can you describe a challenging project you worked on and how you solved the problems?"
+        - Identificar las respuestas del candidato a las 3 preguntas en inglés realizadas, elegidas desde este banco:
+          * "What is your current role and what are your main responsibilities?"
+          * "Can you describe a challenging project you worked on and how you handled it?"
+          * "What has been your biggest professional learning in the last year?"
+          * "What are you expecting from your next professional challenge?"
+          * "Based on the role description, why do you think this position is a good match for you?"
         - Evaluar comprensión, fluidez, vocabulario, gramática, claridad y coherencia.
         - Estimar un nivel CEFR (A1/A2/B1/B2/C1/C2) con justificación basada únicamente en evidencia real.
         - Si el candidato no respondió en inglés o no hay evidencia suficiente, indicarlo explícitamente.

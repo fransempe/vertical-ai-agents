@@ -61,7 +61,7 @@ def test_format_english_assessment():
             "fluency": "Buena fluidez",
             "evidence": [
                 {
-                    "question": "Can you tell me about yourself and your experience?",
+                    "question": "What is your current role and what are your main responsibilities?",
                     "answer": "I have five years of experience.",
                     "evaluation": "Respuesta clara",
                 }
@@ -70,7 +70,7 @@ def test_format_english_assessment():
     )
     assert "B2" in out
     assert "Buena fluidez" in out
-    assert "Can you tell me" in out
+    assert "current role" in out
 
 
 def test_b64decode_padding():
