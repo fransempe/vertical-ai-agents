@@ -33,10 +33,11 @@ def test_create_elevenlabs_agent_success(monkeypatch):
     jd_id = "550e8400-e29b-41d4-a716-446655440000"
     jd_row = {
         "id": jd_id,
-        "job_description": "Descripción larga " * 10,
-        "interview_name": "Entrevista QA",
+        "job_description": "Descripción larga con Next.js, Excel, SAP y redes LAN " * 3,
+        "interview_name": "Entrevista QA NextJS",
         "client_id": "550e8400-e29b-41d4-a716-446655440001",
     }
+    captured_updates = []
 
     class _UpdateChain:
         def __init__(self, upd):
@@ -46,6 +47,7 @@ def test_create_elevenlabs_agent_success(monkeypatch):
             return self
 
         def execute(self):
+            captured_updates.append(self._upd)
             merged = {**jd_row, **self._upd}
             return type("R", (), {"data": [merged]})()
 
@@ -95,6 +97,7 @@ def test_create_elevenlabs_agent_success(monkeypatch):
     assert data["status"] == "success"
     assert data["agent_id"] == "elb-agent-1"
     assert data["jd_interview_id"] == jd_id
+    assert captured_updates[0]["tech_stack"] == ["QA", "NextJS", "Excel", "SAP", "LAN"]
 
 
 def test_create_elevenlabs_agent_success_when_result_is_object_with_agent_id(monkeypatch):
@@ -241,15 +244,30 @@ def test_update_elevenlabs_agent_success(monkeypatch):
     jd_id = "550e8400-e29b-41d4-a716-446655440002"
     jd_row = {
         "id": jd_id,
-        "job_description": "JD para prompt " * 5,
-        "interview_name": "Dev Senior",
+        "job_description": "JD para prompt con SAP, Excel y LAN " * 3,
+        "interview_name": "Dev Senior NextJS",
         "client_id": "550e8400-e29b-41d4-a716-446655440003",
         "agent_id": "existing-agent-9",
     }
+    captured_updates = []
 
     class _JdTable:
         def select(self, *_cols):
             return _SelectChain()
+
+        def update(self, data):
+            return _UpdateChain(data)
+
+    class _UpdateChain:
+        def __init__(self, data):
+            self._data = data
+
+        def eq(self, *_a, **_k):
+            return self
+
+        def execute(self):
+            captured_updates.append(self._data)
+            return type("R", (), {"data": [{**jd_row, **self._data}]})()
 
     class _SelectChain:
         def eq(self, *_a, **_k):
@@ -291,6 +309,7 @@ def test_update_elevenlabs_agent_success(monkeypatch):
     assert data["status"] == "success"
     assert data["agent_id"] == "existing-agent-9"
     assert data["jd_interview_id"] == jd_id
+    assert captured_updates[0]["tech_stack"] == ["NextJS", "SAP", "Excel", "LAN"]
 
 
 def test_update_elevenlabs_agent_returns_404_when_jd_not_found(monkeypatch):
@@ -695,6 +714,19 @@ def test_update_elevenlabs_agent_returns_400_when_job_description_empty(monkeypa
         def select(self, *_cols):
             return _SelectChain()
 
+        def update(self, data):
+            return _UpdateChain(data)
+
+    class _UpdateChain:
+        def __init__(self, data):
+            self._data = data
+
+        def eq(self, *_a, **_k):
+            return self
+
+        def execute(self):
+            return type("R", (), {"data": [{**jd_row, **self._data}]})()
+
     class _SelectChain:
         def eq(self, *_a, **_k):
             return self
@@ -734,6 +766,19 @@ def test_update_elevenlabs_agent_returns_400_when_no_agent_id(monkeypatch):
     class _JdTable:
         def select(self, *_cols):
             return _SelectChain()
+
+        def update(self, data):
+            return _UpdateChain(data)
+
+    class _UpdateChain:
+        def __init__(self, data):
+            self._data = data
+
+        def eq(self, *_a, **_k):
+            return self
+
+        def execute(self):
+            return type("R", (), {"data": [{**jd_row, **self._data}]})()
 
     class _SelectChain:
         def eq(self, *_a, **_k):
@@ -815,6 +860,19 @@ def test_update_elevenlabs_agent_success_when_index_jd_interview_raises(monkeypa
     class _JdTable:
         def select(self, *_cols):
             return _SelectChain()
+
+        def update(self, data):
+            return _UpdateChain(data)
+
+    class _UpdateChain:
+        def __init__(self, data):
+            self._data = data
+
+        def eq(self, *_a, **_k):
+            return self
+
+        def execute(self):
+            return type("R", (), {"data": [{**jd_row, **self._data}]})()
 
     class _SelectChain:
         def eq(self, *_a, **_k):
@@ -1018,6 +1076,19 @@ def _patch_supabase_jd_only(jd_row: dict):
     class _JdTable:
         def select(self, *_cols):
             return _SelectChainPatch()
+
+        def update(self, data):
+            return _UpdateChainPatch(data)
+
+    class _UpdateChainPatch:
+        def __init__(self, data):
+            self._data = data
+
+        def eq(self, *_a, **_k):
+            return self
+
+        def execute(self):
+            return type("R", (), {"data": [{**jd_row, **self._data}]})()
 
     class _SelectChainPatch:
         def eq(self, *_a, **_k):

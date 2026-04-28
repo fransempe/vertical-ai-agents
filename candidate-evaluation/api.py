@@ -41,6 +41,7 @@ from utils.audit_log import (
 )
 from utils.helpers import clean_uuid
 from utils.logger import evaluation_logger
+from utils.tech_stack import extract_tech_stack_from_jd
 
 # ====== Helpers ======
 
@@ -1185,6 +1186,8 @@ def _update_elevenlabs_agent_impl(request: UpdateAgentRequest) -> dict:
             evaluation_logger.log_error("API", error_msg)
             raise HTTPException(status_code=400, detail=error_msg)
 
+        tech_stack = extract_tech_stack_from_jd(job_description, interview_name)
+
         func_to_call = None
         if hasattr(get_client_email, "__wrapped__"):
             func_to_call = get_client_email.__wrapped__
@@ -1278,6 +1281,20 @@ Debes realizar EXACTAMENTE las siguientes preguntas en este orden:
             evaluation_logger.log_error("API", error_msg)
             raise HTTPException(status_code=500, detail=error_msg)
 
+        updated_jd_data = {**jd_data, "tech_stack": tech_stack}
+        tech_stack_update = (
+            supabase.table("jd_interviews").update({"tech_stack": tech_stack}).eq("id", jd_interview_id).execute()
+        )
+        if not tech_stack_update.data:
+            error_msg = f"No se pudo guardar tech_stack en jd_interview {jd_interview_id}"
+            evaluation_logger.log_error("API", error_msg)
+            raise HTTPException(status_code=500, detail=error_msg)
+        updated_jd_data = tech_stack_update.data[0]
+        evaluation_logger.log_task_progress(
+            "Actualizar Agente ElevenLabs",
+            f"Tech stack extraido y guardado en jd_interviews: {tech_stack}",
+        )
+
         execution_time = str(datetime.now() - start_time)
         evaluation_logger.log_task_complete(
             "Actualizar Agente ElevenLabs", f"Agente {agent_id} actualizado exitosamente en {execution_time}"
@@ -1286,7 +1303,7 @@ Debes realizar EXACTAMENTE las siguientes preguntas en este orden:
         try:
             from tools.vector_tools import index_jd_interview
 
-            index_jd_interview(jd_data)
+            index_jd_interview(updated_jd_data)
             evaluation_logger.log_task_progress(
                 "Actualizar Agente ElevenLabs", f"JD Interview re-indexada en knowledge base: {jd_interview_id}"
             )
@@ -1367,6 +1384,9 @@ def _create_elevenlabs_agent_impl(request: CreateAgentRequest) -> CreateAgentRes
             error_msg = f"El jd_interview {jd_interview_id} no tiene client_id asociado"
             evaluation_logger.log_error("API", error_msg)
             raise HTTPException(status_code=400, detail=error_msg)
+
+        tech_stack = extract_tech_stack_from_jd(job_description, interview_name)
+        print(f"🧩 Tech stack extraído del JD: {tech_stack}")
 
         # 2. Obtener email del cliente
         print(f"📧 Obteniendo email del cliente: {client_id}")
@@ -1460,9 +1480,9 @@ def _create_elevenlabs_agent_impl(request: CreateAgentRequest) -> CreateAgentRes
         print(f"   - Agent ID: {agent_id_elevenlabs}")
         print(f"   - Agent Name: {agent_name_final}")
 
-        # 5. Actualizar el registro en jd_interviews con el agent_id
-        print("💾 Actualizando jd_interviews con agent_id...")
-        update_data = {"agent_id": str(agent_id_elevenlabs)}
+        # 5. Actualizar el registro en jd_interviews con el agent_id y tech_stack extraido
+        print("💾 Actualizando jd_interviews con agent_id y tech_stack...")
+        update_data = {"agent_id": str(agent_id_elevenlabs), "tech_stack": tech_stack}
 
         update_response = supabase.table("jd_interviews").update(update_data).eq("id", jd_interview_id).execute()
 
