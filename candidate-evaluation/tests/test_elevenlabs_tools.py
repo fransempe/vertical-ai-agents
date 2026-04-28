@@ -161,14 +161,16 @@ def test_create_elevenlabs_agent_success_mocked(monkeypatch):
     assert out.get("cliente_data") is not None
     captured_prompt = captured["conversation_config"]["agent"]["prompt"]["prompt"]
     english_preset = captured["conversation_config"]["language_presets"]["en"]["overrides"]["agent"]
-    assert "Can you tell me about yourself and your experience?" in captured_prompt
-    assert "Can you describe a challenging project you worked on and how you solved the problems?" in captured_prompt
+    assert "What is your current role and what are your main responsibilities?" in captured_prompt
+    assert "Can you describe a challenging project you worked on and how you handled it?" in captured_prompt
+    assert "EXACTAMENTE 3 preguntas" in captured_prompt
     assert "Now we'll switch to English" in english_preset["first_message"]
-    assert "Can you tell me about yourself and your experience?" in english_preset["prompt"]["prompt"]
+    assert "What is your current role and what are your main responsibilities?" in english_preset["prompt"]["prompt"]
     assert (
-        "Can you describe a challenging project you worked on and how you solved the problems?"
+        "Can you describe a challenging project you worked on and how you handled it?"
         in english_preset["prompt"]["prompt"]
     )
+    assert "Randomly choose EXACTLY 3 questions" in english_preset["prompt"]["prompt"]
 
 
 def test_create_elevenlabs_agent_uses_voice_id_from_env(monkeypatch):

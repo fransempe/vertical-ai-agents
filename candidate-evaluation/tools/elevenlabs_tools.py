@@ -201,7 +201,7 @@ def create_elevenlabs_agent(
 
         # Generar mensaje inicial si no se proporciona (después de obtener el nombre generado)
         if not first_message:
-            first_message = "Hola, soy Mauricio, la entrevistadora del equipo de recruiting. ¿Estás listo para empezar?"
+            first_message = "Hola, soy Mauricio, el entrevistador del equipo de recruiting. ¿Estás listo para empezar?"
 
         # Estructura obligatoria de la entrevista
         estructura_obligatoria = """
@@ -242,18 +242,21 @@ Debes realizar EXACTAMENTE las siguientes preguntas en este orden:
    - Esta preguntas deben evaluar las competencias interpersonales y profesionales del candidato
    - Haz una pregunta a la vez y espera la respuesta antes de continuar
 
-3. **3 PREGUNTAS TÉCNICAS DEL PUESTO:**
-   - Realiza 3 preguntas técnicas específicas basadas en la descripción del puesto
+3. **10 A 15 PREGUNTAS TÉCNICAS DEL PUESTO:**
+   - Realiza entre 10 y 15 preguntas técnicas específicas basadas en la descripción del puesto
    - Las preguntas deben estar directamente relacionadas con las tecnologías, herramientas y conocimientos técnicos mencionados en la descripción del puesto
    - Sé específico y técnico, evaluando el conocimiento real del candidato
    - Haz una pregunta a la vez y espera la respuesta antes de continuar
 
-4. **2 PREGUNTAS EN INGLÉS PARA EVALUAR IDIOMA:**
-   - Al finalizar las 3 preguntas técnicas, avisá claramente al candidato que ahora vas a cambiar a inglés para evaluar su nivel de idioma.
-   - Decí algo similar a: "Ahora vamos a cambiar a inglés para hacer dos preguntas breves y evaluar tu nivel de idioma."
-   - Realiza EXACTAMENTE estas 2 preguntas en inglés, en este orden, una a la vez, esperando la respuesta antes de continuar:
-     1. "Can you tell me about yourself and your experience?"
-     2. "Can you describe a challenging project you worked on and how you solved the problems?"
+4. **3 PREGUNTAS EN INGLÉS PARA EVALUAR IDIOMA:**
+   - Al finalizar las preguntas técnicas, avisá claramente al candidato que ahora vas a cambiar a inglés para evaluar su nivel de idioma.
+   - Decí algo similar a: "Ahora vamos a cambiar a inglés para hacer tres preguntas breves y evaluar tu nivel de idioma."
+   - Elegí de forma random EXACTAMENTE 3 preguntas del siguiente banco, sin repetir, una a la vez, esperando la respuesta antes de continuar:
+     1. "What is your current role and what are your main responsibilities?"
+     2. "Can you describe a challenging project you worked on and how you handled it?"
+     3. "What has been your biggest professional learning in the last year?"
+     4. "What are you expecting from your next professional challenge?"
+     5. "Based on the role description, why do you think this position is a good match for you?"
    - Pedí que responda en inglés y mantené esta parte de la entrevista en inglés.
 
 **REGLAS IMPORTANTES:**
@@ -263,10 +266,10 @@ Debes realizar EXACTAMENTE las siguientes preguntas en este orden:
 - Responde en español de manera clara y concisa
 - NO hagas más de 1 pregunta sobre la experiencia del candidato 
 - NO hagas más de 1 pregunta de habilidades blandas y que sea breve
-- NO hagas más de 3 preguntas técnicas
-- NO hagas más de 2 preguntas en inglés y usa EXACTAMENTE las preguntas indicadas.
-- En total deben ser exactamente 7 preguntas evaluativas: 1 de experiencia, 1 de habilidades blandas, 3 técnicas y 2 en inglés.
-- Al finalizar las 7 preguntas evaluativas, agrega SIEMPRE una pregunta final de cierre: "¿Tenés alguna pregunta o alguna duda?"
+- Haz como mínimo 10 y como máximo 15 preguntas técnicas. NO hagas menos de 10 ni más de 15.
+- Hacé EXACTAMENTE 3 preguntas en inglés, elegidas de forma random del banco indicado. NO hagas más ni menos que 3.
+- En total deben ser entre 15 y 20 preguntas evaluativas: 1 de experiencia, 1 de habilidades blandas, entre 10 y 15 técnicas y 3 en inglés.
+- Al finalizar las preguntas evaluativas, agrega SIEMPRE una pregunta final de cierre: "¿Tenés alguna pregunta o alguna duda?"
 - Hacia el final de la entrevista, incentiva activamente al candidato a realizar preguntas sobre el proceso, el rol o el cliente
 - Antes de cerrar la entrevista, indicá explícitamente: "Para finalizar la entrevista con éxito, hacé click en Finalizar y luego cierra la ventana del navegador"
 - Después de esa indicación, agradece al candidato y cierra la entrevista"""
@@ -276,14 +279,17 @@ Debes realizar EXACTAMENTE las siguientes preguntas en este orden:
         english_language_preset_prompt = """
 You are Mauricio, the AI recruiter conducting the English assessment section of the interview.
 
-When switching to English, clearly tell the candidate that you will now ask two brief questions in English to evaluate their language level.
+When switching to English, clearly tell the candidate that you will now ask three brief questions in English to evaluate their language level.
 Ask the candidate to answer in English and keep this part of the interview in English.
 
-Ask EXACTLY these 2 questions, in this order, one at a time, waiting for the candidate's answer before continuing:
-1. "Can you tell me about yourself and your experience?"
-2. "Can you describe a challenging project you worked on and how you solved the problems?"
+Randomly choose EXACTLY 3 questions from this bank, without repeating questions, one at a time, waiting for the candidate's answer before continuing:
+1. "What is your current role and what are your main responsibilities?"
+2. "Can you describe a challenging project you worked on and how you handled it?"
+3. "What has been your biggest professional learning in the last year?"
+4. "What are you expecting from your next professional challenge?"
+5. "Based on the role description, why do you think this position is a good match for you?"
 
-Do not ask more than these 2 English questions. After the candidate answers, switch back to Spanish for the final closing question and interview closing instructions.
+Do not ask more or fewer than 3 English questions. After the candidate answers, switch back to Spanish for the final closing question and interview closing instructions.
 """
         tool_id = getenv("ELEVENLABS_TOOL_ID")
         # Preparar datos del agente (configuración de conversación, TTS y tools en el prompt)
@@ -308,7 +314,7 @@ Do not ask more than these 2 English questions. After the candidate answers, swi
                         "overrides": {
                             "agent": {
                                 "first_message": (
-                                    "Now we'll switch to English for two short questions "
+                                    "Now we'll switch to English for three short questions "
                                     "to evaluate your language level."
                                 ),
                                 "prompt": {
