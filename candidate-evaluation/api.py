@@ -33,6 +33,12 @@ from tools.supabase_tools import (
     save_meet_evaluation,
 )
 from tools.vector_tools import get_supabase_client, search_similar_chunks
+from utils.audit_log import (
+    record_cv_candidate_audit_event,
+    record_elevenlabs_agent_audit_event,
+    record_evaluation_audit_event,
+    record_matching_audit_event,
+)
 from utils.helpers import clean_uuid
 from utils.logger import evaluation_logger
 
@@ -249,6 +255,7 @@ async def read_cv(request: CVRequest):
     Returns:
         CVAnalysisResponse con los datos extraídos del candidato
     """
+    audit_recorded = False
     try:
         start_time = datetime.now()
         # Verificar variables de entorno
@@ -333,6 +340,26 @@ async def read_cv(request: CVRequest):
         elif candidate_status == "failed":
             base_message += " - No se pudo crear el candidato"
 
+        audit_status = "failed" if candidate_status == "failed" else "success"
+        record_cv_candidate_audit_event(
+            filename=request.filename,
+            action="candidate_creation_from_cv",
+            status=audit_status,
+            metadata={
+                "endpoint": "POST /read-cv",
+                "filename": request.filename,
+                "user_id": request.user_id,
+                "client_id": request.client_id,
+                "execution_time": execution_time,
+                "candidate_created": candidate_created,
+                "candidate_status": candidate_status,
+                "candidate_email": candidate_result.get("email") if isinstance(candidate_result, dict) else None,
+                "candidate_error": candidate_error,
+            },
+            error_message=candidate_error if audit_status == "failed" else None,
+        )
+        audit_recorded = True
+
         return CVAnalysisResponse(
             status="success",
             message=base_message,
@@ -347,6 +374,20 @@ async def read_cv(request: CVRequest):
         )
 
     except Exception as e:
+        if not audit_recorded:
+            failed_filename = getattr(request, "filename", "unknown")
+            record_cv_candidate_audit_event(
+                filename=failed_filename,
+                action="candidate_creation_from_cv",
+                status="failed",
+                metadata={
+                    "endpoint": "POST /read-cv",
+                    "filename": failed_filename,
+                    "user_id": getattr(request, "user_id", None),
+                    "client_id": getattr(request, "client_id", None),
+                },
+                error_message=str(e),
+            )
         evaluation_logger.log_error("CV API", f"Error en análisis de CV: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error en el análisis del CV: {str(e)}")
 
@@ -370,11 +411,24 @@ def do_matching_long_task(run_id: str, user_id: str | None, client_id: str | Non
         missing_vars = [var for var in required_env_vars if not os.getenv(var)]
 
         if missing_vars:
+            error_msg = f"Variables de entorno faltantes: {missing_vars}"
             matching_runs[run_id] = {
                 "status": "error",
-                "error": f"Variables de entorno faltantes: {missing_vars}",
+                "error": error_msg,
                 "runId": run_id,
             }
+            record_matching_audit_event(
+                run_id=run_id,
+                action="candidate_matching",
+                status="failed",
+                metadata={
+                    "process": "do_matching_long_task",
+                    "user_id": user_id,
+                    "client_id": client_id,
+                    "missing_env_vars": missing_vars,
+                },
+                error_message=error_msg,
+            )
             return
 
         # Log inicio del proceso
@@ -440,11 +494,34 @@ def do_matching_long_task(run_id: str, user_id: str | None, client_id: str | Non
             "result": result_data,
             "runId": run_id,
         }
+        record_matching_audit_event(
+            run_id=run_id,
+            action="candidate_matching",
+            status="success",
+            metadata={
+                "process": "do_matching_long_task",
+                "user_id": user_id,
+                "client_id": client_id,
+                "execution_time": execution_time,
+                "total_matches": total_matches,
+            },
+        )
 
     except Exception as e:
         error_msg = str(e)
         evaluation_logger.log_error("Matching API", f"Error en matching: {error_msg}")
         matching_runs[run_id] = {"status": "error", "error": error_msg, "runId": run_id}
+        record_matching_audit_event(
+            run_id=run_id,
+            action="candidate_matching",
+            status="failed",
+            metadata={
+                "process": "do_matching_long_task",
+                "user_id": user_id,
+                "client_id": client_id,
+            },
+            error_message=error_msg,
+        )
 
 
 @app.post("/match-candidates")
@@ -487,6 +564,21 @@ async def match_candidates(request: MatchingRequest = None):
         )
 
     except Exception as e:
+        failed_run_id = locals().get("run_id", "unknown")
+        failed_user_id = locals().get("user_id", None)
+        failed_client_id = locals().get("client_id", None)
+        record_matching_audit_event(
+            run_id=failed_run_id,
+            action="candidate_matching",
+            status="failed",
+            metadata={
+                "endpoint": "POST /match-candidates",
+                "phase": "queue",
+                "user_id": failed_user_id,
+                "client_id": failed_client_id,
+            },
+            error_message=str(e),
+        )
         evaluation_logger.log_error("Matching API", f"Error iniciando matching: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error iniciando matching: {str(e)}")
 
@@ -764,6 +856,7 @@ async def evaluate_single_meet(request: SingleMeetRequest):
             )
 
         # Guardar evaluación en la base de datos - MEET_EVALUATIONS
+        evaluation_id = None
         if isinstance(full_result, dict) and full_result:
             try:
                 # Convertir full_result a JSON string para la función
@@ -970,6 +1063,21 @@ async def evaluate_single_meet(request: SingleMeetRequest):
                 evaluation_logger.log_error("Envío Email Match", f"Error enviando email de match: {str(email_error)}")
                 # No fallar la respuesta por error en el email
 
+        record_evaluation_audit_event(
+            meet_id=meet_id,
+            action="candidate_evaluation",
+            status="success",
+            metadata={
+                "endpoint": "POST /evaluate-meet",
+                "evaluation_id": evaluation_id,
+                "execution_time": str(execution_time),
+                "final_recommendation": result_data.get("final_recommendation"),
+                "is_potential_match": result_data.get("is_potential_match"),
+                "compatibility_score": result_data.get("compatibility_score"),
+                "email_sent": email_sent,
+            },
+        )
+
         return AnalysisResponse(
             status="success",
             message=f"Evaluación del meet {meet_id} completada exitosamente"
@@ -980,6 +1088,14 @@ async def evaluate_single_meet(request: SingleMeetRequest):
         )
 
     except Exception as e:
+        failed_meet_id = getattr(request, "meet_id", "unknown")
+        record_evaluation_audit_event(
+            meet_id=failed_meet_id,
+            action="candidate_evaluation",
+            status="failed",
+            metadata={"endpoint": "POST /evaluate-meet"},
+            error_message=str(e),
+        )
         evaluation_logger.log_error("API", f"Error en evaluación de meet: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error en la evaluación: {str(e)}")
 
@@ -1376,6 +1492,19 @@ def _create_elevenlabs_agent_impl(request: CreateAgentRequest) -> CreateAgentRes
             "Crear Agente ElevenLabs", f"Agente creado y guardado exitosamente: {agent_id_elevenlabs}"
         )
 
+        record_elevenlabs_agent_audit_event(
+            jd_interview_id=jd_interview_id,
+            action="elevenlabs_agent_creation",
+            status="success",
+            metadata={
+                "endpoint": "POST /create-elevenlabs-agent",
+                "agent_id": str(agent_id_elevenlabs),
+                "agent_name": agent_name_final,
+                "interview_name": interview_name,
+                "client_id": client_id,
+            },
+        )
+
         return CreateAgentResponse(
             status="success",
             message="Agente de ElevenLabs creado y guardado exitosamente",
@@ -1385,9 +1514,28 @@ def _create_elevenlabs_agent_impl(request: CreateAgentRequest) -> CreateAgentRes
             agent_name=agent_name_final,
         )
 
-    except HTTPException:
+    except HTTPException as http_error:
+        failed_jd_interview_id = getattr(request, "jd_interview_id", "unknown")
+        record_elevenlabs_agent_audit_event(
+            jd_interview_id=failed_jd_interview_id,
+            action="elevenlabs_agent_creation",
+            status="failed",
+            metadata={
+                "endpoint": "POST /create-elevenlabs-agent",
+                "status_code": http_error.status_code,
+            },
+            error_message=str(http_error.detail),
+        )
         raise
     except Exception as e:
+        failed_jd_interview_id = getattr(request, "jd_interview_id", "unknown")
+        record_elevenlabs_agent_audit_event(
+            jd_interview_id=failed_jd_interview_id,
+            action="elevenlabs_agent_creation",
+            status="failed",
+            metadata={"endpoint": "POST /create-elevenlabs-agent"},
+            error_message=str(e),
+        )
         error_msg = f"Error al crear agente de ElevenLabs: {str(e)}"
         print(f"❌ {error_msg}")
         evaluation_logger.log_error("API", error_msg)
