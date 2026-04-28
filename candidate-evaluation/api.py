@@ -33,8 +33,15 @@ from tools.supabase_tools import (
     save_meet_evaluation,
 )
 from tools.vector_tools import get_supabase_client, search_similar_chunks
+from utils.audit_log import (
+    record_cv_candidate_audit_event,
+    record_elevenlabs_agent_audit_event,
+    record_evaluation_audit_event,
+    record_matching_audit_event,
+)
 from utils.helpers import clean_uuid
 from utils.logger import evaluation_logger
+from utils.tech_stack import extract_tech_stack_from_jd
 
 # ====== Helpers ======
 
@@ -76,6 +83,36 @@ def format_technical_questions(questions: list) -> str:
         question_text = q.get("question", "N/A")
         answered = q.get("answered", "N/A")
         formatted.append(f"  {i}. {question_text} - Contestada: {answered}")
+
+    return "\n".join(formatted) if formatted else "No disponible"
+
+
+def format_english_assessment(english_assessment: dict) -> str:
+    """Formatea la evaluación de inglés para el email"""
+    if not isinstance(english_assessment, dict) or not english_assessment:
+        return "No disponible"
+
+    fields = [
+        ("Nivel estimado", english_assessment.get("cefr_level")),
+        ("Fluidez", english_assessment.get("fluency")),
+        ("Vocabulario", english_assessment.get("vocabulary")),
+        ("Gramática", english_assessment.get("grammar")),
+        ("Comprensión", english_assessment.get("comprehension")),
+        ("Claridad", english_assessment.get("clarity")),
+        ("Resumen", english_assessment.get("summary")),
+    ]
+    formatted = [f"• {label}: {value}" for label, value in fields if value]
+
+    evidence = english_assessment.get("evidence")
+    if isinstance(evidence, list) and evidence:
+        formatted.append("• Evidencia:")
+        for item in evidence:
+            if not isinstance(item, dict):
+                continue
+            question = item.get("question", "N/A")
+            answer = item.get("answer", "N/A")
+            evaluation = item.get("evaluation", "N/A")
+            formatted.append(f"  - {question} | Respuesta: {answer} | Evaluación: {evaluation}")
 
     return "\n".join(formatted) if formatted else "No disponible"
 
@@ -219,6 +256,7 @@ async def read_cv(request: CVRequest):
     Returns:
         CVAnalysisResponse con los datos extraídos del candidato
     """
+    audit_recorded = False
     try:
         start_time = datetime.now()
         # Verificar variables de entorno
@@ -303,6 +341,26 @@ async def read_cv(request: CVRequest):
         elif candidate_status == "failed":
             base_message += " - No se pudo crear el candidato"
 
+        audit_status = "failed" if candidate_status == "failed" else "success"
+        record_cv_candidate_audit_event(
+            filename=request.filename,
+            action="candidate_creation_from_cv",
+            status=audit_status,
+            metadata={
+                "endpoint": "POST /read-cv",
+                "filename": request.filename,
+                "user_id": request.user_id,
+                "client_id": request.client_id,
+                "execution_time": execution_time,
+                "candidate_created": candidate_created,
+                "candidate_status": candidate_status,
+                "candidate_email": candidate_result.get("email") if isinstance(candidate_result, dict) else None,
+                "candidate_error": candidate_error,
+            },
+            error_message=candidate_error if audit_status == "failed" else None,
+        )
+        audit_recorded = True
+
         return CVAnalysisResponse(
             status="success",
             message=base_message,
@@ -317,6 +375,20 @@ async def read_cv(request: CVRequest):
         )
 
     except Exception as e:
+        if not audit_recorded:
+            failed_filename = getattr(request, "filename", "unknown")
+            record_cv_candidate_audit_event(
+                filename=failed_filename,
+                action="candidate_creation_from_cv",
+                status="failed",
+                metadata={
+                    "endpoint": "POST /read-cv",
+                    "filename": failed_filename,
+                    "user_id": getattr(request, "user_id", None),
+                    "client_id": getattr(request, "client_id", None),
+                },
+                error_message=str(e),
+            )
         evaluation_logger.log_error("CV API", f"Error en análisis de CV: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error en el análisis del CV: {str(e)}")
 
@@ -340,11 +412,24 @@ def do_matching_long_task(run_id: str, user_id: str | None, client_id: str | Non
         missing_vars = [var for var in required_env_vars if not os.getenv(var)]
 
         if missing_vars:
+            error_msg = f"Variables de entorno faltantes: {missing_vars}"
             matching_runs[run_id] = {
                 "status": "error",
-                "error": f"Variables de entorno faltantes: {missing_vars}",
+                "error": error_msg,
                 "runId": run_id,
             }
+            record_matching_audit_event(
+                run_id=run_id,
+                action="candidate_matching",
+                status="failed",
+                metadata={
+                    "process": "do_matching_long_task",
+                    "user_id": user_id,
+                    "client_id": client_id,
+                    "missing_env_vars": missing_vars,
+                },
+                error_message=error_msg,
+            )
             return
 
         # Log inicio del proceso
@@ -410,11 +495,34 @@ def do_matching_long_task(run_id: str, user_id: str | None, client_id: str | Non
             "result": result_data,
             "runId": run_id,
         }
+        record_matching_audit_event(
+            run_id=run_id,
+            action="candidate_matching",
+            status="success",
+            metadata={
+                "process": "do_matching_long_task",
+                "user_id": user_id,
+                "client_id": client_id,
+                "execution_time": execution_time,
+                "total_matches": total_matches,
+            },
+        )
 
     except Exception as e:
         error_msg = str(e)
         evaluation_logger.log_error("Matching API", f"Error en matching: {error_msg}")
         matching_runs[run_id] = {"status": "error", "error": error_msg, "runId": run_id}
+        record_matching_audit_event(
+            run_id=run_id,
+            action="candidate_matching",
+            status="failed",
+            metadata={
+                "process": "do_matching_long_task",
+                "user_id": user_id,
+                "client_id": client_id,
+            },
+            error_message=error_msg,
+        )
 
 
 @app.post("/match-candidates")
@@ -457,6 +565,21 @@ async def match_candidates(request: MatchingRequest = None):
         )
 
     except Exception as e:
+        failed_run_id = locals().get("run_id", "unknown")
+        failed_user_id = locals().get("user_id", None)
+        failed_client_id = locals().get("client_id", None)
+        record_matching_audit_event(
+            run_id=failed_run_id,
+            action="candidate_matching",
+            status="failed",
+            metadata={
+                "endpoint": "POST /match-candidates",
+                "phase": "queue",
+                "user_id": failed_user_id,
+                "client_id": failed_client_id,
+            },
+            error_message=str(e),
+        )
         evaluation_logger.log_error("Matching API", f"Error iniciando matching: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error iniciando matching: {str(e)}")
 
@@ -734,6 +857,7 @@ async def evaluate_single_meet(request: SingleMeetRequest):
             )
 
         # Guardar evaluación en la base de datos - MEET_EVALUATIONS
+        evaluation_id = None
         if isinstance(full_result, dict) and full_result:
             try:
                 # Convertir full_result a JSON string para la función
@@ -874,6 +998,7 @@ async def evaluate_single_meet(request: SingleMeetRequest):
                             tech_stack_str = ", ".join(tech_stack) if isinstance(tech_stack, list) else str(tech_stack)
 
                             technical_assessment = conversation_data.get("technical_assessment", {})
+                            english_assessment = conversation_data.get("english_assessment", {})
 
                             # Renderizar plantilla de email
                             body = render_email_template(
@@ -896,6 +1021,7 @@ async def evaluate_single_meet(request: SingleMeetRequest):
                                 technical_questions_formatted=format_technical_questions(
                                     technical_assessment.get("technical_questions", [])
                                 ),
+                                english_assessment_formatted=format_english_assessment(english_assessment),
                                 justification=result_data.get("justification", "No disponible"),
                                 conversation_text=conversation_text,
                                 client_name=client_name,
@@ -938,6 +1064,21 @@ async def evaluate_single_meet(request: SingleMeetRequest):
                 evaluation_logger.log_error("Envío Email Match", f"Error enviando email de match: {str(email_error)}")
                 # No fallar la respuesta por error en el email
 
+        record_evaluation_audit_event(
+            meet_id=meet_id,
+            action="candidate_evaluation",
+            status="success",
+            metadata={
+                "endpoint": "POST /evaluate-meet",
+                "evaluation_id": evaluation_id,
+                "execution_time": str(execution_time),
+                "final_recommendation": result_data.get("final_recommendation"),
+                "is_potential_match": result_data.get("is_potential_match"),
+                "compatibility_score": result_data.get("compatibility_score"),
+                "email_sent": email_sent,
+            },
+        )
+
         return AnalysisResponse(
             status="success",
             message=f"Evaluación del meet {meet_id} completada exitosamente"
@@ -948,6 +1089,14 @@ async def evaluate_single_meet(request: SingleMeetRequest):
         )
 
     except Exception as e:
+        failed_meet_id = getattr(request, "meet_id", "unknown")
+        record_evaluation_audit_event(
+            meet_id=failed_meet_id,
+            action="candidate_evaluation",
+            status="failed",
+            metadata={"endpoint": "POST /evaluate-meet"},
+            error_message=str(e),
+        )
         evaluation_logger.log_error("API", f"Error en evaluación de meet: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error en la evaluación: {str(e)}")
 
@@ -1037,6 +1186,8 @@ def _update_elevenlabs_agent_impl(request: UpdateAgentRequest) -> dict:
             evaluation_logger.log_error("API", error_msg)
             raise HTTPException(status_code=400, detail=error_msg)
 
+        tech_stack = extract_tech_stack_from_jd(job_description, interview_name)
+
         func_to_call = None
         if hasattr(get_client_email, "__wrapped__"):
             func_to_call = get_client_email.__wrapped__
@@ -1082,26 +1233,45 @@ def _update_elevenlabs_agent_impl(request: UpdateAgentRequest) -> dict:
 
 Debes realizar EXACTAMENTE las siguientes preguntas en este orden:
 
-1. **2 PREGUNTAS DE HABILIDADES BLANDAS:**
-   - Realiza 2 preguntas sobre habilidades blandas del candidato
-   - Ejemplos: comunicación, trabajo en equipo, liderazgo, resolución de problemas, adaptabilidad, gestión del tiempo
-   - Estas preguntas deben evaluar las competencias interpersonales y profesionales del candidato
+1. **1 PREGUNTA DE RESPONSABILIDADES EN EXPERIENCIA LABORAL:**
+   - Realiza 1 pregunta sobre experiencia laboral del candidato
+   - Leer del JSON del get-candidate-info las propiedades "responsibilities" y "experiencia" y tomar algunas de las responsabilidades que tuvo el candidato para poder preguntar sobre esa responsabilidad.
    - Haz una pregunta a la vez y espera la respuesta antes de continuar
 
-2. **5 PREGUNTAS TÉCNICAS DEL PUESTO:**
-   - Realiza 5 preguntas técnicas específicas basadas en la descripción del puesto
+2. **1 PREGUNTA DE HABILIDADES BLANDAS:**
+   - Realiza 1 pregunta breve sobre habilidades blandas del candidato
+   - Ejemplos: comunicación, trabajo en equipo, liderazgo, resolución de problemas, adaptabilidad, gestión del tiempo
+   - Esta pregunta debe evaluar las competencias interpersonales y profesionales del candidato
+   - Haz una pregunta a la vez y espera la respuesta antes de continuar
+
+3. **10 A 15 PREGUNTAS TÉCNICAS DEL PUESTO:**
+   - Realiza entre 10 y 15 preguntas técnicas específicas basadas en la descripción del puesto
    - Las preguntas deben estar directamente relacionadas con las tecnologías, herramientas y conocimientos técnicos mencionados en la descripción del puesto
    - Sé específico y técnico, evaluando el conocimiento real del candidato
    - Haz una pregunta a la vez y espera la respuesta antes de continuar
+
+4. **3 PREGUNTAS EN INGLÉS PARA EVALUAR IDIOMA:**
+   - Al finalizar las preguntas técnicas, avisá claramente al candidato que ahora vas a cambiar a inglés para evaluar su nivel de idioma.
+   - Decí algo similar a: "Ahora vamos a cambiar a inglés para hacer tres preguntas breves y evaluar tu nivel de idioma."
+   - Elegí de forma random EXACTAMENTE 3 preguntas del siguiente banco, sin repetir, una a la vez, esperando la respuesta antes de continuar:
+     1. "What is your current role and what are your main responsibilities?"
+     2. "Can you describe a challenging project you worked on and how you handled it?"
+     3. "What has been your biggest professional learning in the last year?"
+     4. "What are you expecting from your next professional challenge?"
+     5. "Based on the role description, why do you think this position is a good match for you?"
+   - Pedí que responda en inglés y mantené esta parte de la entrevista en inglés.
 
 **REGLAS IMPORTANTES:**
 - Mantén un tono profesional pero amigable
 - Evalúa las respuestas del candidato de manera objetiva
 - Guía la conversación de manera estructurada
 - Responde en español de manera clara y concisa
-- NO hagas más de 2 preguntas de habilidades blandas
-- NO hagas más de 5 preguntas técnicas
-- Al finalizar las 7 preguntas técnicas/soft, agrega SIEMPRE una pregunta final de cierre: "¿Tenés alguna pregunta o alguna duda?"
+- NO hagas más de 1 pregunta sobre la experiencia del candidato
+- NO hagas más de 1 pregunta de habilidades blandas
+- Haz como mínimo 10 y como máximo 15 preguntas técnicas. NO hagas menos de 10 ni más de 15.
+- Hacé EXACTAMENTE 3 preguntas en inglés, elegidas de forma random del banco indicado. NO hagas más ni menos que 3.
+- En total deben ser entre 15 y 20 preguntas evaluativas: 1 de experiencia, 1 de habilidades blandas, entre 10 y 15 técnicas y 3 en inglés.
+- Al finalizar las preguntas evaluativas, agrega SIEMPRE una pregunta final de cierre: "¿Tenés alguna pregunta o alguna duda?"
 - Hacia el final de la entrevista, incentiva activamente al candidato a realizar preguntas sobre el proceso, el rol o el cliente
 - Antes de cerrar la entrevista, indicá explícitamente: "Para finalizar la entrevista con éxito, hacé click en Finalizar y luego cierra la ventana del navegador"
 - Después de esa indicación, agradece al candidato y cierra la entrevista"""
@@ -1114,6 +1284,20 @@ Debes realizar EXACTAMENTE las siguientes preguntas en este orden:
             evaluation_logger.log_error("API", error_msg)
             raise HTTPException(status_code=500, detail=error_msg)
 
+        updated_jd_data = {**jd_data, "tech_stack": tech_stack}
+        tech_stack_update = (
+            supabase.table("jd_interviews").update({"tech_stack": tech_stack}).eq("id", jd_interview_id).execute()
+        )
+        if not tech_stack_update.data:
+            error_msg = f"No se pudo guardar tech_stack en jd_interview {jd_interview_id}"
+            evaluation_logger.log_error("API", error_msg)
+            raise HTTPException(status_code=500, detail=error_msg)
+        updated_jd_data = tech_stack_update.data[0]
+        evaluation_logger.log_task_progress(
+            "Actualizar Agente ElevenLabs",
+            f"Tech stack extraido y guardado en jd_interviews: {tech_stack}",
+        )
+
         execution_time = str(datetime.now() - start_time)
         evaluation_logger.log_task_complete(
             "Actualizar Agente ElevenLabs", f"Agente {agent_id} actualizado exitosamente en {execution_time}"
@@ -1122,7 +1306,7 @@ Debes realizar EXACTAMENTE las siguientes preguntas en este orden:
         try:
             from tools.vector_tools import index_jd_interview
 
-            index_jd_interview(jd_data)
+            index_jd_interview(updated_jd_data)
             evaluation_logger.log_task_progress(
                 "Actualizar Agente ElevenLabs", f"JD Interview re-indexada en knowledge base: {jd_interview_id}"
             )
@@ -1203,6 +1387,9 @@ def _create_elevenlabs_agent_impl(request: CreateAgentRequest) -> CreateAgentRes
             error_msg = f"El jd_interview {jd_interview_id} no tiene client_id asociado"
             evaluation_logger.log_error("API", error_msg)
             raise HTTPException(status_code=400, detail=error_msg)
+
+        tech_stack = extract_tech_stack_from_jd(job_description, interview_name)
+        print(f"🧩 Tech stack extraído del JD: {tech_stack}")
 
         # 2. Obtener email del cliente
         print(f"📧 Obteniendo email del cliente: {client_id}")
@@ -1296,9 +1483,9 @@ def _create_elevenlabs_agent_impl(request: CreateAgentRequest) -> CreateAgentRes
         print(f"   - Agent ID: {agent_id_elevenlabs}")
         print(f"   - Agent Name: {agent_name_final}")
 
-        # 5. Actualizar el registro en jd_interviews con el agent_id
-        print("💾 Actualizando jd_interviews con agent_id...")
-        update_data = {"agent_id": str(agent_id_elevenlabs)}
+        # 5. Actualizar el registro en jd_interviews con el agent_id y tech_stack extraido
+        print("💾 Actualizando jd_interviews con agent_id y tech_stack...")
+        update_data = {"agent_id": str(agent_id_elevenlabs), "tech_stack": tech_stack}
 
         update_response = supabase.table("jd_interviews").update(update_data).eq("id", jd_interview_id).execute()
 
@@ -1328,6 +1515,19 @@ def _create_elevenlabs_agent_impl(request: CreateAgentRequest) -> CreateAgentRes
             "Crear Agente ElevenLabs", f"Agente creado y guardado exitosamente: {agent_id_elevenlabs}"
         )
 
+        record_elevenlabs_agent_audit_event(
+            jd_interview_id=jd_interview_id,
+            action="elevenlabs_agent_creation",
+            status="success",
+            metadata={
+                "endpoint": "POST /create-elevenlabs-agent",
+                "agent_id": str(agent_id_elevenlabs),
+                "agent_name": agent_name_final,
+                "interview_name": interview_name,
+                "client_id": client_id,
+            },
+        )
+
         return CreateAgentResponse(
             status="success",
             message="Agente de ElevenLabs creado y guardado exitosamente",
@@ -1337,9 +1537,28 @@ def _create_elevenlabs_agent_impl(request: CreateAgentRequest) -> CreateAgentRes
             agent_name=agent_name_final,
         )
 
-    except HTTPException:
+    except HTTPException as http_error:
+        failed_jd_interview_id = getattr(request, "jd_interview_id", "unknown")
+        record_elevenlabs_agent_audit_event(
+            jd_interview_id=failed_jd_interview_id,
+            action="elevenlabs_agent_creation",
+            status="failed",
+            metadata={
+                "endpoint": "POST /create-elevenlabs-agent",
+                "status_code": http_error.status_code,
+            },
+            error_message=str(http_error.detail),
+        )
         raise
     except Exception as e:
+        failed_jd_interview_id = getattr(request, "jd_interview_id", "unknown")
+        record_elevenlabs_agent_audit_event(
+            jd_interview_id=failed_jd_interview_id,
+            action="elevenlabs_agent_creation",
+            status="failed",
+            metadata={"endpoint": "POST /create-elevenlabs-agent"},
+            error_message=str(e),
+        )
         error_msg = f"Error al crear agente de ElevenLabs: {str(e)}"
         print(f"❌ {error_msg}")
         evaluation_logger.log_error("API", error_msg)

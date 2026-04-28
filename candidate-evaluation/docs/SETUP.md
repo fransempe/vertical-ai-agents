@@ -2,7 +2,7 @@
 
 Guía para preparar el entorno local y ejecutar el paquete `agents/candidate-evaluation`: API FastAPI, crews CrewAI, integración con Supabase y OpenAI.
 
-Para pruebas automatizadas y CI, ver [`TESTING.md`](TESTING.md). Para pgvector y búsqueda vectorial en Supabase, ver [`PGVECTOR_SETUP.md`](PGVECTOR_SETUP.md). Para **procesos de negocio** implementados en el servicio (matching candidatos–JD, etc.), ver [`PROCESSES.md`](PROCESSES.md).
+Para pruebas automatizadas y CI, ver [`TESTING.md`](TESTING.md). Para pgvector y búsqueda vectorial en Supabase, ver [`PGVECTOR_SETUP.md`](PGVECTOR_SETUP.md). Para auditoría funcional en Supabase, ver [`AUDIT_LOG.md`](AUDIT_LOG.md). Para **procesos de negocio** implementados en el servicio (matching candidatos–JD, etc.), ver [`PROCESSES.md`](PROCESSES.md).
 
 ---
 
@@ -87,7 +87,7 @@ Varios endpoints validan subconjuntos distintos al arrancar la petición:
 
 - Rutas que leen CV desde S3 suelen requerir: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `OPENAI_API_KEY`.
 - Muchas rutas de negocio requieren: `SUPABASE_URL`, `SUPABASE_KEY`, `OPENAI_API_KEY`.
-- Rutas de ElevenLabs requieren: `SUPABASE_URL`, `SUPABASE_KEY`, `ELEVENLABS_API_KEY`.
+- Rutas de ElevenLabs requieren: `SUPABASE_URL`, `SUPABASE_KEY`, `ELEVENLABS_API_KEY`. Opcionalmente, `ELEVENLABS_VOICE_ID` define la voz usada al crear agentes; si no se configura, se usa Melanie.
 
 Configura todo lo que vayas a usar en local; si un endpoint pide variables que no están definidas, responderá con error de configuración.
 
@@ -103,6 +103,7 @@ Configura todo lo que vayas a usar en local; si un endpoint pide variables que n
 | `REPORT_TO_EMAIL` | Destino de reportes cuando el flujo lo usa |
 | `GRAPH_TENANT_ID`, `GRAPH_CLIENT_ID`, `GRAPH_CLIENT_SECRET`, `GRAPH_SCOPE`, `GRAPH_BASE`, `OUTLOOK_USER_ID` | Microsoft Graph / Outlook (`tools/email_tools.py`) |
 | `CANDIDATE_EVAL_INTEGRATION_BASE_URL`, `CANDIDATE_EVAL_INTEGRATION_BEARER_TOKEN`, `CANDIDATE_EVAL_INTEGRATION_POST_SMOKE`, `CANDIDATE_EVAL_INTEGRATION_CHATBOT_LIVE` | Solo tests de integración (`tests/integration/`) |
+| `AUDIT_LOG_ENABLED` | Si vale `true`, `1`, `yes` u `on`, el servicio intenta insertar eventos en `audit_events` para auditoría funcional. Requiere ejecutar antes `database/setup-audit-log.sql`. |
 
 No commitees secretos: mantén `.env` fuera del control de versiones (debe estar en `.gitignore`).
 
@@ -177,6 +178,7 @@ Detalle de marcadores, integración y CI: [`TESTING.md`](TESTING.md).
 |-----------|-----------|
 | [`TESTING.md`](TESTING.md) | Pytest, cobertura, integración |
 | [`PGVECTOR_SETUP.md`](PGVECTOR_SETUP.md) | Extensión `vector`, tablas, índices |
+| [`AUDIT_LOG.md`](AUDIT_LOG.md) | Tabla `audit_events`, activación y consumo desde backoffice |
 | [`VECTOR_SEARCH_TESTING.md`](VECTOR_SEARCH_TESTING.md) | Pruebas de búsqueda vectorial |
 
 ---

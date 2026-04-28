@@ -130,12 +130,15 @@ def test_create_elevenlabs_agent_success_mocked(monkeypatch):
             "agent_name": "Agente Entrevista",
         }
 
+    captured = {}
+
     class _CreateResp:
         def dict(self):
             return {"agent_id": "new_ag_1", "name": "Agente Entrevista"}
 
     class _Agents:
-        def create(self, **_kwargs):
+        def create(self, **kwargs):
+            captured["conversation_config"] = kwargs["conversation_config"]
             return _CreateResp()
 
     class _Conv:
@@ -156,6 +159,53 @@ def test_create_elevenlabs_agent_success_mocked(monkeypatch):
     assert out is not None
     assert out.get("agent_id") == "new_ag_1"
     assert out.get("cliente_data") is not None
+    captured_prompt = captured["conversation_config"]["agent"]["prompt"]["prompt"]
+    english_preset = captured["conversation_config"]["language_presets"]["en"]["overrides"]["agent"]
+    assert "What is your current role and what are your main responsibilities?" in captured_prompt
+    assert "Can you describe a challenging project you worked on and how you handled it?" in captured_prompt
+    assert "EXACTAMENTE 3 preguntas" in captured_prompt
+    assert "Now we'll switch to English" in english_preset["first_message"]
+    assert "What is your current role and what are your main responsibilities?" in english_preset["prompt"]["prompt"]
+    assert (
+        "Can you describe a challenging project you worked on and how you handled it?"
+        in english_preset["prompt"]["prompt"]
+    )
+    assert "Randomly choose EXACTLY 3 questions" in english_preset["prompt"]["prompt"]
+
+
+def test_create_elevenlabs_agent_uses_voice_id_from_env(monkeypatch):
+    from tools import elevenlabs_tools
+
+    monkeypatch.setenv("ELEVENLABS_API_KEY", "sk-eleven-test")
+    monkeypatch.setenv("ELEVENLABS_TOOL_ID", "tool_xyz")
+    monkeypatch.setenv("ELEVENLABS_VOICE_ID", "voice_from_env")
+
+    def _fake_prompt(*_a, **_k):
+        return {"prompt": "P", "cliente": {}, "agent_name": "A"}
+
+    captured = {}
+
+    class _CreateResp:
+        def dict(self):
+            return {"agent_id": "ag"}
+
+    class _Agents:
+        def create(self, **kwargs):
+            captured["tts"] = kwargs["conversation_config"]["tts"]
+            return _CreateResp()
+
+    class _Conv:
+        agents = _Agents()
+
+    class _FakeElevenLabs:
+        conversational_ai = _Conv()
+
+    monkeypatch.setattr(elevenlabs_tools, "ElevenLabs", lambda **kw: _FakeElevenLabs())
+    monkeypatch.setattr(elevenlabs_tools, "generate_elevenlabs_prompt_from_jd", _fake_prompt)
+
+    elevenlabs_tools.create_elevenlabs_agent("A", "I", "J", "e@e.com")
+
+    assert captured["tts"]["voice_id"] == "voice_from_env"
 
 
 def test_create_elevenlabs_agent_ignores_generated_name_with_null(monkeypatch):
