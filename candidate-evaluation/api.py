@@ -80,6 +80,36 @@ def format_technical_questions(questions: list) -> str:
     return "\n".join(formatted) if formatted else "No disponible"
 
 
+def format_english_assessment(english_assessment: dict) -> str:
+    """Formatea la evaluación de inglés para el email"""
+    if not isinstance(english_assessment, dict) or not english_assessment:
+        return "No disponible"
+
+    fields = [
+        ("Nivel estimado", english_assessment.get("cefr_level")),
+        ("Fluidez", english_assessment.get("fluency")),
+        ("Vocabulario", english_assessment.get("vocabulary")),
+        ("Gramática", english_assessment.get("grammar")),
+        ("Comprensión", english_assessment.get("comprehension")),
+        ("Claridad", english_assessment.get("clarity")),
+        ("Resumen", english_assessment.get("summary")),
+    ]
+    formatted = [f"• {label}: {value}" for label, value in fields if value]
+
+    evidence = english_assessment.get("evidence")
+    if isinstance(evidence, list) and evidence:
+        formatted.append("• Evidencia:")
+        for item in evidence:
+            if not isinstance(item, dict):
+                continue
+            question = item.get("question", "N/A")
+            answer = item.get("answer", "N/A")
+            evaluation = item.get("evaluation", "N/A")
+            formatted.append(f"  - {question} | Respuesta: {answer} | Evaluación: {evaluation}")
+
+    return "\n".join(formatted) if formatted else "No disponible"
+
+
 def load_email_template(template_name: str) -> str:
     """
     Carga una plantilla de email desde el directorio templates/email
@@ -874,6 +904,7 @@ async def evaluate_single_meet(request: SingleMeetRequest):
                             tech_stack_str = ", ".join(tech_stack) if isinstance(tech_stack, list) else str(tech_stack)
 
                             technical_assessment = conversation_data.get("technical_assessment", {})
+                            english_assessment = conversation_data.get("english_assessment", {})
 
                             # Renderizar plantilla de email
                             body = render_email_template(
@@ -896,6 +927,7 @@ async def evaluate_single_meet(request: SingleMeetRequest):
                                 technical_questions_formatted=format_technical_questions(
                                     technical_assessment.get("technical_questions", [])
                                 ),
+                                english_assessment_formatted=format_english_assessment(english_assessment),
                                 justification=result_data.get("justification", "No disponible"),
                                 conversation_text=conversation_text,
                                 client_name=client_name,
@@ -1082,26 +1114,42 @@ def _update_elevenlabs_agent_impl(request: UpdateAgentRequest) -> dict:
 
 Debes realizar EXACTAMENTE las siguientes preguntas en este orden:
 
-1. **2 PREGUNTAS DE HABILIDADES BLANDAS:**
-   - Realiza 2 preguntas sobre habilidades blandas del candidato
-   - Ejemplos: comunicación, trabajo en equipo, liderazgo, resolución de problemas, adaptabilidad, gestión del tiempo
-   - Estas preguntas deben evaluar las competencias interpersonales y profesionales del candidato
+1. **1 PREGUNTA DE RESPONSABILIDADES EN EXPERIENCIA LABORAL:**
+   - Realiza 1 pregunta sobre experiencia laboral del candidato
+   - Leer del JSON del get-candidate-info las propiedades "responsibilities" y "experiencia" y tomar algunas de las responsabilidades que tuvo el candidato para poder preguntar sobre esa responsabilidad.
    - Haz una pregunta a la vez y espera la respuesta antes de continuar
 
-2. **5 PREGUNTAS TÉCNICAS DEL PUESTO:**
-   - Realiza 5 preguntas técnicas específicas basadas en la descripción del puesto
+2. **1 PREGUNTA DE HABILIDADES BLANDAS:**
+   - Realiza 1 pregunta breve sobre habilidades blandas del candidato
+   - Ejemplos: comunicación, trabajo en equipo, liderazgo, resolución de problemas, adaptabilidad, gestión del tiempo
+   - Esta pregunta debe evaluar las competencias interpersonales y profesionales del candidato
+   - Haz una pregunta a la vez y espera la respuesta antes de continuar
+
+3. **3 PREGUNTAS TÉCNICAS DEL PUESTO:**
+   - Realiza 3 preguntas técnicas específicas basadas en la descripción del puesto
    - Las preguntas deben estar directamente relacionadas con las tecnologías, herramientas y conocimientos técnicos mencionados en la descripción del puesto
    - Sé específico y técnico, evaluando el conocimiento real del candidato
    - Haz una pregunta a la vez y espera la respuesta antes de continuar
+
+4. **2 PREGUNTAS EN INGLÉS PARA EVALUAR IDIOMA:**
+   - Al finalizar las 3 preguntas técnicas, avisá claramente al candidato que ahora vas a cambiar a inglés para evaluar su nivel de idioma.
+   - Decí algo similar a: "Ahora vamos a cambiar a inglés para hacer dos preguntas breves y evaluar tu nivel de idioma."
+   - Realiza EXACTAMENTE estas 2 preguntas en inglés, en este orden, una a la vez, esperando la respuesta antes de continuar:
+     1. "Can you tell me about yourself and your experience?"
+     2. "Can you describe a challenging project you worked on and how you solved the problems?"
+   - Pedí que responda en inglés y mantené esta parte de la entrevista en inglés.
 
 **REGLAS IMPORTANTES:**
 - Mantén un tono profesional pero amigable
 - Evalúa las respuestas del candidato de manera objetiva
 - Guía la conversación de manera estructurada
 - Responde en español de manera clara y concisa
-- NO hagas más de 2 preguntas de habilidades blandas
-- NO hagas más de 5 preguntas técnicas
-- Al finalizar las 7 preguntas técnicas/soft, agrega SIEMPRE una pregunta final de cierre: "¿Tenés alguna pregunta o alguna duda?"
+- NO hagas más de 1 pregunta sobre la experiencia del candidato
+- NO hagas más de 1 pregunta de habilidades blandas
+- NO hagas más de 3 preguntas técnicas
+- NO hagas más de 2 preguntas en inglés y usa EXACTAMENTE las preguntas indicadas.
+- En total deben ser exactamente 7 preguntas evaluativas: 1 de experiencia, 1 de habilidades blandas, 3 técnicas y 2 en inglés.
+- Al finalizar las 7 preguntas evaluativas, agrega SIEMPRE una pregunta final de cierre: "¿Tenés alguna pregunta o alguna duda?"
 - Hacia el final de la entrevista, incentiva activamente al candidato a realizar preguntas sobre el proceso, el rol o el cliente
 - Antes de cerrar la entrevista, indicá explícitamente: "Para finalizar la entrevista con éxito, hacé click en Finalizar y luego cierra la ventana del navegador"
 - Después de esa indicación, agradece al candidato y cierra la entrevista"""

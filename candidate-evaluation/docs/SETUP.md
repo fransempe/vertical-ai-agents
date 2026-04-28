@@ -87,7 +87,7 @@ Varios endpoints validan subconjuntos distintos al arrancar la petición:
 
 - Rutas que leen CV desde S3 suelen requerir: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `OPENAI_API_KEY`.
 - Muchas rutas de negocio requieren: `SUPABASE_URL`, `SUPABASE_KEY`, `OPENAI_API_KEY`.
-- Rutas de ElevenLabs requieren: `SUPABASE_URL`, `SUPABASE_KEY`, `ELEVENLABS_API_KEY`.
+- Rutas de ElevenLabs requieren: `SUPABASE_URL`, `SUPABASE_KEY`, `ELEVENLABS_API_KEY`. Opcionalmente, `ELEVENLABS_VOICE_ID` define la voz usada al crear agentes; si no se configura, se usa Melanie.
 
 Configura todo lo que vayas a usar en local; si un endpoint pide variables que no están definidas, responderá con error de configuración.
 

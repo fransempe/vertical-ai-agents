@@ -93,6 +93,7 @@ def create_conversation_analyzer_agent():
         - Psicología organizacional y evaluación de competencias
         - Análisis de habilidades blandas (comunicación, liderazgo, trabajo en equipo, etc.)
         - Evaluación técnica y profesional
+        - Evaluación de nivel de inglés en entrevistas bilingües
         - Identificación de fortalezas y áreas de mejora
         - Predicción de desempeño laboral basada en patrones conversacionales
         - Detección de red flags y señales positivas en candidatos
@@ -110,9 +111,13 @@ def create_conversation_analyzer_agent():
         2. Extraer el texto completo de cada pregunta técnica realizada por el AI
         3. Verificar que cada pregunta sea específicamente sobre la tecnología/stack del puesto (basado en job_description)
         4. Para cada pregunta: copiar el texto exacto, verificar si fue contestada (SÍ/NO/PARCIALMENTE), copiar la respuesta exacta del candidato
-        5. Crear resumen detallado de completitud: [X/5 completamente contestadas, X/5 parcialmente, X/5 no contestadas]
+        5. Crear resumen detallado de completitud: [X/Y completamente contestadas, X/Y parcialmente, X/Y no contestadas]
         6. Si hay preguntas sin contestar, generar ALERTA CRÍTICA especificando exactamente cuáles son
         7. Evaluar la calidad técnica de cada respuesta y el nivel de conocimiento en la tecnología específica demostrado.
+
+        **EVALUACIÓN DE INGLÉS:** Identificar las dos preguntas en inglés de la entrevista y analizar las respuestas reales del candidato.
+        Evaluar comprensión, fluidez, vocabulario, gramática, claridad y coherencia. Estimar un nivel de inglés (A1/A2/B1/B2/C1/C2)
+        únicamente con evidencia de la conversación; si no hay respuestas en inglés, indicar que no hay evidencia suficiente.
 
         Tu objetivo es proporcionar evaluaciones exhaustivas y cualitativas que ayuden a tomar decisiones de contratación informadas y justas.""",
         verbose=False,
@@ -377,6 +382,7 @@ def create_single_meet_evaluator_agent():
         - Evaluación de compatibilidad candidato-puesto
         - Determinación de match potencial basado en JD
         - Análisis de habilidades técnicas y blandas
+        - Evaluación de nivel de inglés basada en respuestas reales del candidato
         - Identificación de señales positivas y red flags
         
         **ENFOQUE PRINCIPAL:** Analizar la FORMA de responder del candidato, no solo el contenido.
@@ -397,6 +403,10 @@ def create_single_meet_evaluator_agent():
         - Si no hay evidencia suficiente para evaluar algo, indica claramente "No hay evidencia suficiente" o "No disponible en los datos"
         - Usa ÚNICAMENTE la información real que proviene de la base de datos a través de get_meet_evaluation_data
         - Todo lo que analices DEBE estar basado en datos reales de la conversación, candidato, JD o cliente
+
+        **EVALUACIÓN DE INGLÉS:** Si la entrevista incluye preguntas en inglés, analizá las respuestas del candidato para estimar
+        su nivel de idioma (A1/A2/B1/B2/C1/C2), con evidencia sobre comprensión, fluidez, vocabulario, gramática, claridad y coherencia.
+        No inventes desempeño lingüístico si el candidato no respondió en inglés o no hay evidencia suficiente.
         
         Tu objetivo es proporcionar una evaluación completa y justificada que determine si el candidato 
         es un posible match para el puesto descrito en la JD, usando SOLO datos reales de la base de datos.""",
