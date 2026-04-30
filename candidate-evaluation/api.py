@@ -9,7 +9,7 @@ import os
 import re
 import threading
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -243,6 +243,19 @@ class RunStatusResponse(BaseModel):
     message: str = None
     result: dict = None
     error: str = None
+
+
+class EvaluationJobsProcessRequest(BaseModel):
+    limit: int = 1
+    worker_id: str | None = None
+    lock_timeout_minutes: int = 15
+    source: str | None = None
+
+
+class EvaluationJobRetryResponse(BaseModel):
+    status: str
+    message: str
+    job: dict | None = None
 
 
 @app.post("/read-cv", response_model=CVAnalysisResponse)
@@ -624,6 +637,146 @@ async def get_status():
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "service": "Candidate Evaluation API",
     }
+
+
+def _get_evaluation_jobs_supabase_client():
+    url = os.getenv("SUPABASE_URL")
+    key = os.getenv("SUPABASE_KEY")
+    if not url or not key:
+        raise HTTPException(status_code=500, detail="SUPABASE_URL y SUPABASE_KEY son requeridos")
+    return create_client(url, key)
+
+
+def _job_result_payload(response: AnalysisResponse) -> dict[str, Any]:
+    return {
+        "status": response.status,
+        "message": response.message,
+        "timestamp": response.timestamp,
+        "execution_time": response.execution_time,
+        "result": response.result,
+        "evaluation_id": response.evaluation_id,
+    }
+
+
+def _mark_evaluation_job_completed(supabase, job: dict[str, Any], response: AnalysisResponse) -> None:
+    attempts = int(job.get("attempts") or 0) + 1
+    payload = {
+        "status": "completed",
+        "attempts": attempts,
+        "locked_at": None,
+        "locked_by": None,
+        "last_error": None,
+        "result": _job_result_payload(response),
+        "completed_at": datetime.now().isoformat(),
+    }
+    supabase.table("evaluation_jobs").update(payload).eq("id", job["id"]).execute()
+
+
+def _mark_evaluation_job_failed(supabase, job: dict[str, Any], error: Exception) -> dict[str, Any]:
+    attempts = int(job.get("attempts") or 0) + 1
+    max_attempts = int(job.get("max_attempts") or 5)
+    retry_delay_minutes = min(2 ** max(attempts - 1, 0), 60)
+    will_retry = attempts < max_attempts
+    payload = {
+        "status": "failed",
+        "attempts": attempts,
+        "locked_at": None,
+        "locked_by": None,
+        "last_error": str(error),
+        "next_run_at": (datetime.now() + timedelta(minutes=retry_delay_minutes)).isoformat()
+        if will_retry
+        else datetime.now().isoformat(),
+    }
+    supabase.table("evaluation_jobs").update(payload).eq("id", job["id"]).execute()
+    return {
+        "job_id": job.get("id"),
+        "meet_id": job.get("meet_id"),
+        "status": "failed",
+        "attempts": attempts,
+        "max_attempts": max_attempts,
+        "will_retry": will_retry,
+        "next_run_at": payload["next_run_at"],
+        "error": str(error),
+    }
+
+
+async def _process_claimed_evaluation_job(supabase, job: dict[str, Any]) -> dict[str, Any]:
+    try:
+        meet_id = job.get("meet_id")
+        if not meet_id:
+            raise ValueError("evaluation_job.meet_id is required")
+
+        evaluation_logger.log_task_start(
+            "Evaluation Jobs Worker",
+            f"Procesando job {job.get('id')} para meet {meet_id}",
+        )
+        response = await evaluate_single_meet(SingleMeetRequest(meet_id=meet_id))
+        _mark_evaluation_job_completed(supabase, job, response)
+        evaluation_logger.log_task_complete(
+            "Evaluation Jobs Worker",
+            f"Job {job.get('id')} completado para meet {meet_id}",
+        )
+        return {
+            "job_id": job.get("id"),
+            "meet_id": meet_id,
+            "status": "completed",
+            "evaluation_id": response.evaluation_id,
+        }
+    except Exception as error:
+        evaluation_logger.log_error(
+            "Evaluation Jobs Worker",
+            f"Job {job.get('id')} falló: {error}",
+        )
+        return _mark_evaluation_job_failed(supabase, job, error)
+
+
+@app.post("/evaluation-jobs/process")
+async def process_evaluation_jobs(request: EvaluationJobsProcessRequest | None = None):
+    """
+    Reclama y procesa jobs pendientes de evaluacion de entrevistas.
+    Puede ser invocado por el backoffice como kick, por Railway Cron o manualmente.
+    """
+    request = request or EvaluationJobsProcessRequest()
+    limit = max(1, min(request.limit or 1, 10))
+    worker_id = request.worker_id or f"candidate-evaluation-api-{uuid.uuid4()}"
+    supabase = _get_evaluation_jobs_supabase_client()
+
+    claimed_response = supabase.rpc(
+        "claim_evaluation_jobs",
+        {
+            "p_worker_id": worker_id,
+            "p_limit": limit,
+            "p_lock_timeout_minutes": request.lock_timeout_minutes,
+        },
+    ).execute()
+    jobs = claimed_response.data or []
+
+    processed = []
+    for job in jobs:
+        processed.append(await _process_claimed_evaluation_job(supabase, job))
+
+    return {
+        "status": "ok",
+        "worker_id": worker_id,
+        "claimed": len(jobs),
+        "processed": processed,
+        "source": request.source,
+    }
+
+
+@app.post("/evaluation-jobs/{job_id}/retry", response_model=EvaluationJobRetryResponse)
+async def retry_evaluation_job(job_id: str):
+    """
+    Reintenta manualmente un job failed/cancelled usando la funcion SQL retry_evaluation_job.
+    """
+    supabase = _get_evaluation_jobs_supabase_client()
+    response = supabase.rpc("retry_evaluation_job", {"p_job_id": job_id}).execute()
+    job = response.data
+    if isinstance(job, list):
+        job = job[0] if job else None
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found or not retryable")
+    return EvaluationJobRetryResponse(status="ok", message="Job queued for retry", job=job)
 
 
 @app.post("/evaluate-meet", response_model=AnalysisResponse)
