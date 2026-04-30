@@ -104,6 +104,9 @@ Configura todo lo que vayas a usar en local; si un endpoint pide variables que n
 | `GRAPH_TENANT_ID`, `GRAPH_CLIENT_ID`, `GRAPH_CLIENT_SECRET`, `GRAPH_SCOPE`, `GRAPH_BASE`, `OUTLOOK_USER_ID` | Microsoft Graph / Outlook (`tools/email_tools.py`) |
 | `CANDIDATE_EVAL_INTEGRATION_BASE_URL`, `CANDIDATE_EVAL_INTEGRATION_BEARER_TOKEN`, `CANDIDATE_EVAL_INTEGRATION_POST_SMOKE`, `CANDIDATE_EVAL_INTEGRATION_CHATBOT_LIVE` | Solo tests de integración (`tests/integration/`) |
 | `AUDIT_LOG_ENABLED` | Si vale `true`, `1`, `yes` u `on`, el servicio intenta insertar eventos en `audit_events` para auditoría funcional. Requiere ejecutar antes `database/setup-audit-log.sql`. |
+| `RAILWAY_RUN_MODE` | Modo del entrypoint `railway_start.py`. Por defecto `api`; usar `worker-cron` en el service cron de Railway. |
+| `EVALUATION_JOBS_CRON_LIMIT` | Cantidad máxima de jobs a procesar por ejecución cron. Por defecto `3`. |
+| `EVALUATION_JOBS_WORKER_ID` | Identificador del worker usado al reclamar jobs. Por defecto `railway-cron`. |
 
 Para el worker async de evaluaciones de entrevistas, `SUPABASE_URL` y `SUPABASE_KEY` deben apuntar al mismo proyecto donde el backoffice creó `evaluation_jobs` con `hr-backoffice/database/evaluation-jobs.sql`.
 
@@ -160,6 +163,46 @@ curl -X POST http://127.0.0.1:8000/evaluation-jobs/process \
 ```
 
 En producción conviene configurar un cron/worker periódico que llame ese endpoint, además del “kick” que hace el backoffice al encolar. El flujo completo está documentado en [`PROCESSES.md`](PROCESSES.md#2-evaluación-async-de-entrevistas).
+
+### 5.2.2 Railway API y cron
+
+Railway usa el start command definido en `railway.json`:
+
+```bash
+python railway_start.py
+```
+
+Ese entrypoint decide qué proceso ejecutar según `RAILWAY_RUN_MODE`:
+
+| Service | Variables | Proceso |
+|---------|-----------|---------|
+| API normal | sin `RAILWAY_RUN_MODE` o `RAILWAY_RUN_MODE=api` | Levanta `uvicorn api:app --host 0.0.0.0 --port $PORT` |
+| Cron worker | `RAILWAY_RUN_MODE=worker-cron` | Ejecuta `process_evaluation_jobs(...)`, imprime el resultado y termina |
+
+Config recomendada para el **segundo service** de Railway que corre como cron:
+
+```env
+RAILWAY_RUN_MODE=worker-cron
+EVALUATION_JOBS_CRON_LIMIT=3
+EVALUATION_JOBS_WORKER_ID=railway-cron
+SUPABASE_URL=...
+SUPABASE_KEY=...
+OPENAI_API_KEY=...
+```
+
+Cron schedule recomendado:
+
+```cron
+*/5 * * * *
+```
+
+Si el cron ejecuta pero no cambia ningún estado en `evaluation_jobs`, revisar los logs. Una ejecución saludable imprime algo con esta forma:
+
+```json
+{"status":"ok","worker_id":"railway-cron","claimed":1,"processed":[...]}
+```
+
+Si `claimed` es `0`, el cron corrió pero no encontró jobs elegibles (`pending` o `failed`, `next_run_at <= now()`, `attempts < max_attempts`). Ver el troubleshooting en [`PROCESSES.md`](PROCESSES.md#2-evaluación-async-de-entrevistas).
 
 ### 5.3 Indexación inicial para búsqueda vectorial
 
