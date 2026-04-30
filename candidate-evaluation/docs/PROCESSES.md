@@ -189,6 +189,39 @@ Requiere que el job esté `failed` o `cancelled`. La función SQL lo vuelve a `p
 
 Configurar Railway Cron o un worker periódico:
 
+El deploy usa `railway.json` con:
+
+```bash
+python railway_start.py
+```
+
+Ese entrypoint corre la API por defecto. Para el service cron, configurar la variable:
+
+```env
+RAILWAY_RUN_MODE=worker-cron
+```
+
+Con ese modo, Railway ejecuta `process_evaluation_jobs(...)`, procesa hasta `EVALUATION_JOBS_CRON_LIMIT` jobs y el proceso termina. Esto es importante porque los cron jobs de Railway ejecutan el start command y esperan que el proceso finalice; no deben levantar `uvicorn`.
+
+Variables recomendadas para el service cron:
+
+```env
+RAILWAY_RUN_MODE=worker-cron
+EVALUATION_JOBS_CRON_LIMIT=3
+EVALUATION_JOBS_WORKER_ID=railway-cron
+SUPABASE_URL=...
+SUPABASE_KEY=...
+OPENAI_API_KEY=...
+```
+
+Cron schedule recomendado en Railway:
+
+```cron
+*/5 * * * *
+```
+
+Alternativamente, se puede llamar el endpoint HTTP del service API:
+
 ```bash
 curl -X POST "$MULTIAGENT_PROJECT_URL/evaluation-jobs/process" \
   -H "Content-Type: application/json" \
@@ -208,7 +241,51 @@ Esto recupera:
 | `SUPABASE_URL` | Obligatoria para reclamar y actualizar jobs |
 | `SUPABASE_KEY` | Obligatoria para reclamar y actualizar jobs |
 | `OPENAI_API_KEY` | Requerida por la evaluación CrewAI |
+| `RAILWAY_RUN_MODE` | Usar `worker-cron` en el service cron. Por defecto corre la API. |
+| `EVALUATION_JOBS_CRON_LIMIT` | Máximo de jobs por ejecución cron. Por defecto `3`. |
+| `EVALUATION_JOBS_WORKER_ID` | Identificador para `locked_by`. Por defecto `railway-cron`. |
 | Variables de email / ElevenLabs | Según las ramas de evaluación que se ejecuten |
+
+### Troubleshooting del cron
+
+Si Railway ejecuta el cron pero el estado de `evaluation_jobs` no cambia:
+
+1. Confirmar que el service cron tiene `RAILWAY_RUN_MODE=worker-cron`.
+2. Confirmar que el root directory del service es `candidate-evaluation`.
+3. Confirmar que `SUPABASE_URL` y `SUPABASE_KEY` apuntan al mismo Supabase que usa el backoffice.
+4. Revisar logs del cron. Debe imprimir un JSON con `status`, `worker_id`, `claimed` y `processed`.
+5. Si `claimed` es `0`, no hay jobs elegibles para reclamar.
+
+Consulta para revisar elegibilidad:
+
+```sql
+select id, meet_id, status, attempts, max_attempts, next_run_at, locked_at, locked_by, last_error
+from evaluation_jobs
+where job_type = 'evaluate_meet'
+order by created_at desc
+limit 20;
+```
+
+El worker toma jobs que cumplan:
+
+- `status in ('pending', 'failed')`
+- `next_run_at <= now()`
+- `attempts < max_attempts`
+
+También recupera jobs `running` con `locked_at` vencido.
+
+Para forzar una prueba:
+
+```sql
+update evaluation_jobs
+set status = 'pending',
+    attempts = 0,
+    next_run_at = now(),
+    locked_at = null,
+    locked_by = null,
+    last_error = null
+where id = 'JOB_ID';
+```
 
 ### Tests
 
