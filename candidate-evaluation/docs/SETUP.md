@@ -105,6 +105,8 @@ Configura todo lo que vayas a usar en local; si un endpoint pide variables que n
 | `CANDIDATE_EVAL_INTEGRATION_BASE_URL`, `CANDIDATE_EVAL_INTEGRATION_BEARER_TOKEN`, `CANDIDATE_EVAL_INTEGRATION_POST_SMOKE`, `CANDIDATE_EVAL_INTEGRATION_CHATBOT_LIVE` | Solo tests de integración (`tests/integration/`) |
 | `AUDIT_LOG_ENABLED` | Si vale `true`, `1`, `yes` u `on`, el servicio intenta insertar eventos en `audit_events` para auditoría funcional. Requiere ejecutar antes `database/setup-audit-log.sql`. |
 
+Para el worker async de evaluaciones de entrevistas, `SUPABASE_URL` y `SUPABASE_KEY` deben apuntar al mismo proyecto donde el backoffice creó `evaluation_jobs` con `hr-backoffice/database/evaluation-jobs.sql`.
+
 No commitees secretos: mantén `.env` fuera del control de versiones (debe estar en `.gitignore`).
 
 ---
@@ -145,7 +147,19 @@ Comprobación rápida sin autenticación extra (según despliegue):
 curl -s http://127.0.0.1:8000/status
 ```
 
-Endpoints relevantes incluyen entre otros: `POST /read-cv`, `POST /match-candidates`, `POST /evaluate-meet`, `POST /chatbot`, `GET /get-candidate-info/{candidate_id}` (ver `api.py`).
+Endpoints relevantes incluyen entre otros: `POST /read-cv`, `POST /match-candidates`, `POST /evaluate-meet`, `POST /evaluation-jobs/process`, `POST /evaluation-jobs/{job_id}/retry`, `POST /chatbot`, `GET /get-candidate-info/{candidate_id}` (ver `api.py`).
+
+### 5.2.1 Worker async de evaluaciones
+
+Para procesar jobs encolados por el backoffice:
+
+```bash
+curl -X POST http://127.0.0.1:8000/evaluation-jobs/process \
+  -H "Content-Type: application/json" \
+  -d '{"limit": 1, "source": "local"}'
+```
+
+En producción conviene configurar un cron/worker periódico que llame ese endpoint, además del “kick” que hace el backoffice al encolar. El flujo completo está documentado en [`PROCESSES.md`](PROCESSES.md#2-evaluación-async-de-entrevistas).
 
 ### 5.3 Indexación inicial para búsqueda vectorial
 
