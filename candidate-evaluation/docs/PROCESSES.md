@@ -7,6 +7,7 @@ Documentación de flujos de negocio implementados en el servicio (API FastAPI, S
 ## Índice
 
 1. [Matching de candidatos con búsquedas (JD)](#1-matching-de-candidatos-con-búsquedas-jd)
+2. [Evaluación async de entrevistas](#2-evaluación-async-de-entrevistas)
 
 ---
 
@@ -95,4 +96,129 @@ El **HR Backoffice** transforma y muestra estos datos; puede rehidratar `agent_i
 
 ---
 
-*Última actualización alineada con el motor determinístico en `matching_engine.py` y `do_matching_long_task` en `api.py`.*
+## 2. Evaluación async de entrevistas
+
+### Objetivo
+
+Procesar evaluaciones de entrevistas sin depender de que una request HTTP larga sobreviva en Railway. El HR Backoffice guarda un job en Supabase (`evaluation_jobs`) y este servicio lo reclama, ejecuta la evaluación del meet y actualiza el estado del job.
+
+### Entrada desde backoffice
+
+El backoffice encola jobs en dos caminos:
+
+- `POST /api/conversations` cuando la conversación llega con `finalize: true` y no trae `skip_evaluation: true`.
+- `POST /api/processes/evaluate-meet` para re-evaluación o disparo manual.
+
+Ambos caminos escriben un registro `job_type = 'evaluate_meet'` en `evaluation_jobs` y luego intentan despertar este servicio con:
+
+```http
+POST /evaluation-jobs/process
+```
+
+Ese “kick” no es crítico. Si falla, el job queda persistido y puede levantarlo un cron o una llamada manual posterior.
+
+### Tabla y RPC requeridas
+
+Antes de usar este flujo, ejecutar el script del backoffice:
+
+```bash
+psql "$DATABASE_URL" -f ../hr-backoffice/database/evaluation-jobs.sql
+```
+
+En Supabase crea:
+
+- Tabla `evaluation_jobs`.
+- RPC `claim_evaluation_jobs(p_worker_id, p_limit, p_lock_timeout_minutes)`.
+- RPC `retry_evaluation_job(p_job_id)`.
+
+La RPC de claim usa `FOR UPDATE SKIP LOCKED`, por lo que múltiples workers pueden correr sin tomar el mismo job.
+
+### Endpoint de procesamiento
+
+```http
+POST /evaluation-jobs/process
+```
+
+Body opcional:
+
+```json
+{
+  "limit": 1,
+  "worker_id": "railway-cron-1",
+  "lock_timeout_minutes": 15,
+  "source": "railway-cron"
+}
+```
+
+Comportamiento:
+
+1. Reclama hasta `limit` jobs pendientes, fallidos listos para retry o `running` con lock vencido.
+2. Para cada job, toma `meet_id`.
+3. Ejecuta la misma lógica de `POST /evaluate-meet`.
+4. Si completa, marca el job `completed` y guarda un resumen en `result`.
+5. Si falla, marca `failed`, incrementa `attempts`, guarda `last_error` y programa `next_run_at` con backoff.
+
+Respuesta típica:
+
+```json
+{
+  "status": "ok",
+  "worker_id": "railway-cron-1",
+  "claimed": 1,
+  "processed": [
+    {
+      "job_id": "uuid-del-job",
+      "meet_id": "uuid-del-meet",
+      "status": "completed",
+      "evaluation_id": "uuid-de-evaluacion"
+    }
+  ],
+  "source": "railway-cron"
+}
+```
+
+### Retry manual
+
+```http
+POST /evaluation-jobs/{job_id}/retry
+```
+
+Requiere que el job esté `failed` o `cancelled`. La función SQL lo vuelve a `pending`, limpia `last_error`, desbloquea el worker y deja `next_run_at = now()`.
+
+### Operación recomendada
+
+Configurar Railway Cron o un worker periódico:
+
+```bash
+curl -X POST "$MULTIAGENT_PROJECT_URL/evaluation-jobs/process" \
+  -H "Content-Type: application/json" \
+  -d '{"limit": 3, "source": "railway-cron"}'
+```
+
+Esto recupera:
+
+- Jobs que quedaron `pending` porque el backoffice no pudo despertar el servicio.
+- Jobs `failed` cuyo `next_run_at` ya venció.
+- Jobs `running` con `locked_at` vencido por caída del worker.
+
+### Variables de entorno
+
+| Variable | Uso |
+|----------|-----|
+| `SUPABASE_URL` | Obligatoria para reclamar y actualizar jobs |
+| `SUPABASE_KEY` | Obligatoria para reclamar y actualizar jobs |
+| `OPENAI_API_KEY` | Requerida por la evaluación CrewAI |
+| Variables de email / ElevenLabs | Según las ramas de evaluación que se ejecuten |
+
+### Tests
+
+- `tests/test_api_evaluate_meet.py`: cobertura del endpoint sincrónico de evaluación.
+- `tests/test_api_evaluation_jobs.py`: claim/procesamiento/retry del worker async.
+
+### Relación con `/evaluate-meet`
+
+`POST /evaluate-meet` sigue existiendo para ejecución directa o pruebas. El worker async reutiliza esa lógica para no duplicar el pipeline de evaluación.
+
+---
+
+*Última actualización alineada con el motor determinístico en `matching_engine.py`, `do_matching_long_task` en `api.py` y el worker async de `evaluation_jobs`.*
