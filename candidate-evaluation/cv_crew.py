@@ -101,16 +101,39 @@ def create_cv_analysis_crew(filename: str, user_id: str = None, client_id: str =
            
            IMPORTANTE: El JSON debe ser válido y estar correctamente formateado. Si algún campo no tiene información, usa un array vacío [] o null según corresponda.
            
-        7. Crea o actualiza el candidato en la tabla 'candidates' usando la herramienta create_candidate, con los campos:
+        7. Prepara un JSON `candidate_payload` para que la API cree o actualice el candidato en la tabla 'candidates', con los campos:
            - name, email, phone, linkedin (si está disponible), tech_stack (array)
            - observations: El JSON string con toda la información adicional extraída (debe ser un JSON válido)
            - cv_url: Construir como "{cv_url_base}/{filename}"
            {f" - user_id: {user_id}, client_id: {client_id} (IMPORTANTE: incluir estos parámetros si están disponibles)" if user_id and client_id else ""}
-        8. Confirma el resultado del upsert devolviendo el ID o el registro creado
+        8. NO crees el candidato. Tu responsabilidad termina en devolver el JSON `candidate_payload`.
+           La API se encargara de llamar a create_candidate de forma deterministica.
         
         FORMATO DE SALIDA REQUERIDO:
         Debes retornar la información en el siguiente formato estructurado:
         
+        JSON PARA CREACION:
+        ------------------
+        Incluye exactamente un objeto JSON parseable con esta forma:
+        {{
+          "candidate_payload": {{
+            "name": "...",
+            "email": "...",
+            "phone": "...",
+            "linkedin": null,
+            "cv_url": "{cv_url_base}/{filename}",
+            "tech_stack": ["..."],
+            "observations": {{
+              "role_profile": {{"role": "...", "profile": "..."}},
+              "work_experience": [],
+              "industries_and_sectors": [],
+              "languages": [],
+              "certifications_and_courses": [],
+              "other": null
+            }}
+          }}
+        }}
+
         ========================================
         ANÁLISIS DE CV - {filename}
         ========================================
@@ -172,6 +195,7 @@ def create_cv_analysis_crew(filename: str, user_id: str = None, client_id: str =
             "other": "..."
           }
         - Resultado de creación/actualización en Supabase (candidates)
+        - JSON exacto con `candidate_payload`, para que la API cree o actualice el candidato
         Todo presentado de forma clara y legible, con el JSON de observations correctamente formateado
         """,
         agent=cv_analyzer,

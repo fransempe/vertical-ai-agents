@@ -1292,7 +1292,53 @@ def test_create_candidate_inserts_and_skips_index_errors(monkeypatch):
     assert out["data"][0]["id"] == "cand-new-1"
 
 
-def test_create_candidate_returns_already_exists_when_email_duplicate(monkeypatch):
+def test_create_candidate_insert_without_returned_id_reports_failure(monkeypatch):
+    monkeypatch.setenv("SUPABASE_URL", "http://local.test")
+    monkeypatch.setenv("SUPABASE_KEY", "secret")
+
+    class _InsertExec:
+        def execute(self):
+            return type("R", (), {"data": []})()
+
+    class _CandTable:
+        def select(self, *_a):
+            return _EmptySelect()
+
+        def insert(self, _p):
+            return _InsertExec()
+
+    class _EmptySelect:
+        def eq(self, *_a):
+            return self
+
+        def limit(self, _n):
+            return self
+
+        def execute(self):
+            return type("R", (), {"data": []})()
+
+    class _Sb:
+        def table(self, name):
+            assert name == "candidates"
+            return _CandTable()
+
+    monkeypatch.setattr(supabase_tools, "create_client", lambda u, k: _Sb())
+
+    out = json.loads(
+        supabase_tools.create_candidate.func(
+            "Nuevo",
+            "nuevo.noid@test.example",
+            "555",
+            "https://cv.example/x.pdf",
+            "Python",
+        )
+    )
+    assert out["success"] is False
+    assert out["candidate_created"] is False
+    assert "no retorno" in out["error"]
+
+
+def test_create_candidate_updates_existing_when_email_duplicate(monkeypatch):
     monkeypatch.setenv("SUPABASE_URL", "http://local.test")
     monkeypatch.setenv("SUPABASE_KEY", "secret")
 
@@ -1300,7 +1346,15 @@ def test_create_candidate_returns_already_exists_when_email_duplicate(monkeypatc
         "id": "550e8400-e29b-41d4-a716-446655440050",
         "email": "dup.only@test.example",
         "name": "Existente",
+        "phone": None,
+        "cv_url": "http://old-cv",
+        "tech_stack": ["Python"],
+        "observations": {
+            "languages": [{"language": "English", "level": "advanced"}],
+            "other": "Dato anterior",
+        },
     }
+    update_payloads = []
 
     class _DupSelect:
         def eq(self, *_a):
@@ -1312,16 +1366,33 @@ def test_create_candidate_returns_already_exists_when_email_duplicate(monkeypatc
         def execute(self):
             return type("R", (), {"data": [existing]})()
 
+    class _UpdateExec:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def eq(self, *_a):
+            return self
+
+        def execute(self):
+            update_payloads.append(self.payload)
+            return type("R", (), {"data": [{**existing, **self.payload}]})()
+
     class _CandTable:
         def select(self, *_a):
             return _DupSelect()
+
+        def update(self, payload):
+            return _UpdateExec(payload)
 
     class _Sb:
         def table(self, name):
             assert name == "candidates"
             return _CandTable()
 
+    import tools.vector_tools as vector_tools
+
     monkeypatch.setattr(supabase_tools, "create_client", lambda u, k: _Sb())
+    monkeypatch.setattr(vector_tools, "index_candidate", lambda _r: None)
 
     out = json.loads(
         supabase_tools.create_candidate.func(
@@ -1330,11 +1401,27 @@ def test_create_candidate_returns_already_exists_when_email_duplicate(monkeypatc
             "1",
             "http://cv",
             "Go",
+            observations=json.dumps(
+                {
+                    "languages": [{"language": "English", "level": "advanced"}],
+                    "certifications_and_courses": [{"name": "AWS", "issuer": "Amazon"}],
+                    "other": None,
+                }
+            ),
         )
     )
-    assert out["success"] is False
-    assert out.get("error_type") == "AlreadyExists"
+    assert out["success"] is True
+    assert out["action"] == "updated"
+    assert out["candidate_created"] is False
     assert out["existing"]["id"] == existing["id"]
+    assert update_payloads[0]["phone"] == "1"
+    assert update_payloads[0]["cv_url"] == "http://cv"
+    assert update_payloads[0]["tech_stack"] == ["Python", "Go"]
+    assert update_payloads[0]["observations"]["languages"] == [{"language": "English", "level": "advanced"}]
+    assert update_payloads[0]["observations"]["certifications_and_courses"] == [
+        {"name": "AWS", "issuer": "Amazon"}
+    ]
+    assert update_payloads[0]["observations"]["other"] == "Dato anterior"
 
 
 def test_create_candidate_inserts_candidate_recruiters_when_ids_given(monkeypatch):

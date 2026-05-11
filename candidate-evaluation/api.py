@@ -27,6 +27,7 @@ from tools.elevenlabs_tools import (
     update_elevenlabs_agent_prompt,
 )
 from tools.supabase_tools import (
+    create_candidate,
     get_client_email,
     get_meet_evaluation_data,
     log_matching_inputs_debug,
@@ -307,48 +308,103 @@ async def read_cv(request: CVRequest):
         candidate_created = None
         candidate_error = None
         candidate_result = None
+        parsed_json_objects = []
         try:
             import json as _json
             import re
 
-            # Buscar posibles bloques JSON en el texto
-            json_like = re.findall(r"\{[\s\S]*?\}", result_text)
-            parsed = []
-            for block in json_like:
+            # Buscar posibles objetos JSON completos en el texto, incluyendo JSON anidado.
+            decoder = _json.JSONDecoder()
+            parsed = parsed_json_objects
+            for match in re.finditer(r"\{", result_text):
                 try:
-                    obj = _json.loads(block)
+                    obj, _end = decoder.raw_decode(result_text[match.start() :])
                     parsed.append(obj)
                 except Exception:
                     continue
             # Heurística: quedarnos con el último que tenga 'success' o 'error_type'
             for obj in reversed(parsed):
-                if isinstance(obj, dict) and ("success" in obj or "error_type" in obj or "email" in obj):
+                if isinstance(obj, dict) and ("success" in obj or "error_type" in obj or "action" in obj):
                     candidate_result = obj
                     break
             if candidate_result is not None:
-                if "success" in candidate_result:
+                if "candidate_created" in candidate_result:
+                    candidate_created = candidate_result.get("candidate_created")
+                elif candidate_result.get("action") == "updated":
+                    candidate_created = False
+                elif "success" in candidate_result:
                     candidate_created = bool(candidate_result.get("success"))
-                if not candidate_created:
+                if candidate_result.get("success") is False:
                     candidate_error = candidate_result.get("error") or candidate_result.get("error_type")
         except Exception:
             # Si falla el parseo, lo ignoramos
             pass
 
+        if candidate_result is None:
+            candidate_payload = None
+            for obj in reversed(parsed_json_objects):
+                if isinstance(obj, dict) and isinstance(obj.get("candidate_payload"), dict):
+                    candidate_payload = obj["candidate_payload"]
+                    break
+
+            if candidate_payload:
+                try:
+                    create_candidate_callable = getattr(create_candidate, "func", create_candidate)
+                    tech_stack_value = candidate_payload.get("tech_stack") or []
+                    observations_value = candidate_payload.get("observations")
+                    candidate_create_raw = create_candidate_callable(
+                        name=candidate_payload.get("name"),
+                        email=candidate_payload.get("email"),
+                        phone=candidate_payload.get("phone"),
+                        cv_url=candidate_payload.get("cv_url"),
+                        tech_stack=_json.dumps(tech_stack_value, ensure_ascii=False)
+                        if isinstance(tech_stack_value, list)
+                        else str(tech_stack_value or ""),
+                        linkedin=candidate_payload.get("linkedin"),
+                        observations=_json.dumps(observations_value, ensure_ascii=False)
+                        if isinstance(observations_value, dict)
+                        else observations_value,
+                        user_id=request.user_id,
+                        client_id=request.client_id,
+                    )
+                    candidate_result = _json.loads(candidate_create_raw)
+                    result_text = f"{result_text}\n\nCREATE_CANDIDATE_RESULT:\n{candidate_create_raw}"
+                    if "candidate_created" in candidate_result:
+                        candidate_created = candidate_result.get("candidate_created")
+                    elif candidate_result.get("action") == "updated":
+                        candidate_created = False
+                    elif "success" in candidate_result:
+                        candidate_created = bool(candidate_result.get("success"))
+                    if candidate_result.get("success") is False:
+                        candidate_error = candidate_result.get("error") or candidate_result.get("error_type")
+                except Exception as create_error:
+                    candidate_result = {
+                        "success": False,
+                        "error": f"Error creando candidato desde candidate_payload: {str(create_error)}",
+                    }
+                    candidate_created = False
+                    candidate_error = candidate_result["error"]
+
         # Determinar estado legible
         candidate_status = None
         if candidate_result is not None:
             error_type = (candidate_result.get("error_type") or "").lower()
-            if candidate_created is True:
+            action = (candidate_result.get("action") or "").lower()
+            if candidate_result.get("success") is False and not error_type:
+                candidate_status = "failed"
+            elif action == "updated":
+                candidate_status = "updated"
+            elif candidate_created is True or action == "created":
                 candidate_status = "created"
             elif error_type == "alreadyexists":
                 candidate_status = "exists"
-            elif candidate_created is False and not error_type:
-                candidate_status = "failed"
 
         # Mensaje claro
         base_message = "Análisis de CV completado exitosamente"
         if candidate_status == "created":
             base_message += " - Candidato agregado"
+        elif candidate_status == "updated":
+            base_message += " - Candidato actualizado"
         elif candidate_status == "exists":
             base_message += " - Candidato ya existía"
         elif candidate_status == "failed":

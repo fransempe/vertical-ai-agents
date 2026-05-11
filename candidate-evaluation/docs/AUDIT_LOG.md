@@ -59,7 +59,7 @@ El endpoint `POST /read-cv` registra:
 
 | Acción | Estado | Cuándo ocurre |
 |--------|--------|---------------|
-| `candidate_creation_from_cv` | `success` | Cuando el análisis de CV termina y el candidato fue creado, ya existía o no se pudo determinar el resultado de creación |
+| `candidate_creation_from_cv` | `success` | Cuando el análisis de CV termina y el candidato fue creado, actualizado, ya existía o no se pudo determinar el resultado de creación |
 | `candidate_creation_from_cv` | `failed` | Si falla la creación del candidato reportada por el crew o si falla el proceso de lectura/análisis del CV |
 
 El endpoint `POST /create-elevenlabs-agent` registra:
