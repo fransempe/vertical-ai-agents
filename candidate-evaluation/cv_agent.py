@@ -10,7 +10,6 @@ from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 
 from tools.cv_tools import download_cv_from_s3, extract_candidate_data
-from tools.supabase_tools import create_candidate
 
 load_dotenv()
 AWS_S3_URL = os.getenv("AWS_S3_URL", "")
@@ -86,7 +85,7 @@ def create_cv_analyzer_agent():
         - Construye la URL del CV con el bucket y región configurados en el entorno (AWS_BUCKET_NAME, S3_REGION): "{cv_url_base}/{{nombre_archivo}}"
         - Ejemplo: para archivo "cv_juan.pdf" → "{cv_url_base}/cv_juan.pdf"
         """,
-        tools=[download_cv_from_s3, extract_candidate_data, create_candidate],
+        tools=[download_cv_from_s3, extract_candidate_data],
         verbose=True,
         llm=llm,
     )

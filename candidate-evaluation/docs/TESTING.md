@@ -144,7 +144,7 @@ pytest --cov=. --cov-report=term-missing
 | `test_api_status.py` | `GET /status` con `TestClient`. |
 | `test_api_matching_routes.py` | `GET /match-candidates/{run_id}` (404, `done`, `error`, `queued`); **`POST /match-candidates`** con mock de `do_matching_long_task` o **500** si `Thread.start` falla. |
 | `test_api_matching_long_task.py` | **`do_matching_long_task`**: env faltante, éxito con/sin filtros, **`kickoff`** con error, JSON lista, dict **sin** clave **`matches`**, texto sin **`"matches"`** útil, **markdown** + recuperación, **`.raw`**, extracción **markdown** / **llaves**. |
-| `test_api_read_cv.py` | `POST /read-cv`: éxito; **`.raw`** con JSON; varios **`{...}`** en el texto (último bloque con **success**); estados **AlreadyExists** / **failed**; **kickoff** que lanza → 500; **env obligatorio** faltante → 500. |
+| `test_api_read_cv.py` | `POST /read-cv`: éxito; **`.raw`** con JSON; varios **`{...}`** en el texto (último bloque con **success**); estados **created** / **updated** / legacy **AlreadyExists** / **failed**; **kickoff** que lanza → 500; **env obligatorio** faltante → 500. |
 | `test_api_evaluate_meet.py` | `POST /evaluate-meet`: matriz 8–10 + **sin Supabase**; **500** fábrica crew; **string** sin JSON / **`{invalid}`** / JSON **lista**; **`get_meet_evaluation_data._func`** (**`SimpleNamespace`**); enriquecimiento con error; parse y **`save_meet_evaluation`** (**`__wrapped__`**, fallo, excepción, **None**); **emociones** desde `conversations`; **except** en fallback emotion si **`create_client`** falla. |
 | `test_api_candidate_and_chatbot.py` | `GET /get-candidate-info`: UUID inválido, **not_found**, éxito, **`tech_stack` no lista** + `observations.other`, excepción Supabase → 500, fila **no mapping** → 500; `POST /chatbot` sin `OPENAI_API_KEY` → 500. |
 | `test_api_chatbot_success.py` | `POST /chatbot`: RAG+OpenAI mockeados; ramas sin contexto; **thresholds** 0.3/0.4/0.5; **historial** en mensajes OpenAI; **chunks** sin resultados vectoriales en ningún threshold; **excepción genérica** (p. ej. fallo en `get_supabase_client`) → 500. |
@@ -226,7 +226,7 @@ Las tandas describen cómo fue creciendo la suite; sirven para contexto y para p
 - **`api.py`**: `POST /evaluate-meet` con resultado del crew sin `candidate.id` / `jd_interview.id`; `get_meet_evaluation_data` mockeado (`.func`) y captura del JSON pasado a `save_meet_evaluation` para comprobar enriquecimiento.
 - **`api.py`**: `POST /chatbot` con `total_chunks == 0` y con error en `search_similar_chunks` (OpenAI mockeado vía `openai.OpenAI`).
 - **`tools/vector_tools.py`**: `index_all_candidate_jd_status(limit=None)`; filas con fallo en `index_candidate_jd_status` incrementan solo los aciertos válidos.
-- **`tools/supabase_tools.py`**: `get_jd_interviews_data(None)` → consulta `status=active` y `limit=50`; `create_candidate` con insert mockeado y `index_candidate` que falla (no rompe la creación).
+- **`tools/supabase_tools.py`**: `get_jd_interviews_data(None)` → consulta `status=active` y `limit=50`; `create_candidate` con insert mockeado, update por email existente y `index_candidate` que falla (no rompe la creación).
 - **`tasks.py`**: `create_processing_task` con cuatro tareas en `context`.
 
 ### Tanda 8

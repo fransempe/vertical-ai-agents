@@ -1664,7 +1664,7 @@ def create_candidate(
     client_id: str = None,
 ) -> str:
     """
-    Crea (o actualiza por email) un candidato en la tabla 'candidates'.
+    Crea o actualiza por email un candidato en la tabla 'candidates'.
     Si se proporcionan user_id y client_id, también crea un registro en candidate_recruiters.
 
     Args:
@@ -1738,6 +1738,139 @@ def create_candidate(
             "observations": parsed_observations,
         }
 
+        def _summarize_candidate_payload(candidate_payload):
+            observations_value = candidate_payload.get("observations")
+            return {
+                "name": candidate_payload.get("name"),
+                "email": candidate_payload.get("email"),
+                "phone_present": bool(candidate_payload.get("phone")),
+                "linkedin_present": bool(candidate_payload.get("linkedin")),
+                "cv_url": candidate_payload.get("cv_url"),
+                "tech_stack_count": len(candidate_payload.get("tech_stack") or []),
+                "observations_keys": list(observations_value.keys()) if isinstance(observations_value, dict) else [],
+                "has_user_id": bool(user_id),
+                "has_client_id": bool(client_id),
+            }
+
+        def _parse_observations_value(value):
+            if isinstance(value, dict):
+                return value
+            if isinstance(value, str) and value.strip():
+                try:
+                    parsed = json.loads(value)
+                    return parsed if isinstance(parsed, dict) else None
+                except json.JSONDecodeError:
+                    return None
+            return None
+
+        def _merge_lists(existing_items, incoming_items):
+            merged = []
+            seen = set()
+            for item in [*(existing_items or []), *(incoming_items or [])]:
+                marker = json.dumps(item, sort_keys=True, ensure_ascii=False) if isinstance(item, dict) else str(item)
+                if marker not in seen:
+                    merged.append(item)
+                    seen.add(marker)
+            return merged
+
+        def _merge_tech_stack(existing_stack, incoming_stack):
+            existing_list = existing_stack if isinstance(existing_stack, list) else []
+            incoming_list = incoming_stack if isinstance(incoming_stack, list) else []
+            merged = []
+            seen = set()
+            for item in [*existing_list, *incoming_list]:
+                normalized = str(item).strip()
+                key = normalized.lower()
+                if normalized and key not in seen:
+                    merged.append(normalized)
+                    seen.add(key)
+            return merged or None
+
+        def _merge_observations(existing_value, incoming_value):
+            existing_obs = _parse_observations_value(existing_value) or {}
+            incoming_obs = _parse_observations_value(incoming_value) or {}
+            if not existing_obs:
+                return incoming_obs or None
+            if not incoming_obs:
+                return existing_obs
+
+            merged = dict(existing_obs)
+            for key, value in incoming_obs.items():
+                if value in (None, "", [], {}):
+                    continue
+                current = merged.get(key)
+                if isinstance(current, list) and isinstance(value, list):
+                    merged[key] = _merge_lists(current, value)
+                elif isinstance(current, dict) and isinstance(value, dict):
+                    merged[key] = {**current, **{k: v for k, v in value.items() if v not in (None, "", [], {})}}
+                else:
+                    merged[key] = value
+            return merged
+
+        def _build_update_payload(existing_row):
+            update_payload = {}
+            for field in ("name", "email", "phone", "linkedin"):
+                incoming_value = payload.get(field)
+                if incoming_value and not existing_row.get(field):
+                    update_payload[field] = incoming_value
+
+            if payload.get("cv_url"):
+                update_payload["cv_url"] = payload["cv_url"]
+
+            merged_stack = _merge_tech_stack(existing_row.get("tech_stack"), payload.get("tech_stack"))
+            if merged_stack and merged_stack != existing_row.get("tech_stack"):
+                update_payload["tech_stack"] = merged_stack
+
+            merged_observations = _merge_observations(existing_row.get("observations"), payload.get("observations"))
+            existing_observations = _parse_observations_value(existing_row.get("observations"))
+            if merged_observations and merged_observations != existing_observations:
+                update_payload["observations"] = merged_observations
+
+            return update_payload
+
+        def _create_candidate_recruiter_link(candidate_id):
+            if not (candidate_id and user_id and client_id):
+                evaluation_logger.log_task_progress(
+                    "Crear Candidato",
+                    f"No se crea candidate_recruiters: candidate_id={candidate_id}, has_user_id={bool(user_id)}, has_client_id={bool(client_id)}",
+                )
+                return {"attempted": False, "success": None, "error": None}
+            try:
+                recruiter_data = {"candidate_id": candidate_id, "user_id": user_id, "client_id": client_id}
+                evaluation_logger.log_task_progress(
+                    "Crear Candidato",
+                    f"Insertando candidate_recruiters: candidate_id={candidate_id}, user_id={user_id}, client_id={client_id}",
+                )
+                recruiter_response = supabase.table("candidate_recruiters").insert(recruiter_data).execute()
+
+                if recruiter_response.data:
+                    evaluation_logger.log_task_complete(
+                        "Crear Candidato",
+                        f"Registro creado en candidate_recruiters para candidate_id: {candidate_id}",
+                    )
+                    print(
+                        f"Registro creado en candidate_recruiters: candidate_id={candidate_id}, user_id={user_id}, client_id={client_id}"
+                    )
+                    return {"attempted": True, "success": True, "error": None}
+                else:
+                    evaluation_logger.log_error(
+                        "Crear Candidato",
+                        f"No se pudo crear registro en candidate_recruiters para candidate_id: {candidate_id}",
+                    )
+                    print("No se pudo crear registro en candidate_recruiters")
+                    return {
+                        "attempted": True,
+                        "success": False,
+                        "error": "Insert en candidate_recruiters no retorno datos",
+                    }
+            except Exception as recruiter_error:
+                # No fallar la creacion/actualizacion del candidato si falla candidate_recruiters.
+                evaluation_logger.log_error(
+                    "Crear Candidato", f"Error creando registro en candidate_recruiters: {str(recruiter_error)}"
+                )
+                print(f"Error creando registro en candidate_recruiters: {str(recruiter_error)}")
+                return {"attempted": True, "success": False, "error": str(recruiter_error)}
+
         # Validar email básico (si viene)
         email_value = (email or "").strip()
         is_valid_email = False
@@ -1752,14 +1885,43 @@ def create_candidate(
             try:
                 existing = supabase.table("candidates").select("*").eq("email", email_value).limit(1).execute()
                 if existing.data and len(existing.data) > 0:
-                    # Ya existe → devolver error explícito
+                    # Ya existe: actualizar/enriquecer sin crear duplicados.
+                    existing_row = existing.data[0]
+                    candidate_id = existing_row.get("id")
+                    update_payload = _build_update_payload(existing_row)
+
+                    if update_payload and candidate_id:
+                        response = supabase.table("candidates").update(update_payload).eq("id", candidate_id).execute()
+                        updated_data = response.data if response.data else [{**existing_row, **update_payload}]
+                    else:
+                        updated_data = [existing_row]
+
+                    recruiter_link = _create_candidate_recruiter_link(candidate_id)
+
+                    if candidate_id and updated_data:
+                        try:
+                            from tools.vector_tools import index_candidate
+
+                            index_candidate(updated_data[0])
+                            evaluation_logger.log_task_progress(
+                                "Crear Candidato", f"Candidato actualizado e indexado en knowledge base: {candidate_id}"
+                            )
+                        except Exception as index_error:
+                            evaluation_logger.log_error(
+                                "Crear Candidato", f"Error indexando candidato actualizado: {str(index_error)}"
+                            )
+
+                    evaluation_logger.log_task_complete("Crear Candidato", "Registro actualizado en candidates")
                     return json.dumps(
                         {
-                            "success": False,
-                            "error": "Candidate already exists with this email",
-                            "error_type": "AlreadyExists",
+                            "success": True,
+                            "action": "updated",
+                            "candidate_created": False,
+                            "candidate_updated": bool(update_payload),
                             "email": email_value,
-                            "existing": existing.data[0],
+                            "data": updated_data,
+                            "existing": existing_row,
+                            "candidate_recruiter_link": recruiter_link,
                         },
                         indent=2,
                         ensure_ascii=False,
@@ -1769,18 +1931,43 @@ def create_candidate(
                 evaluation_logger.log_error("Crear Candidato", f"Error verificando existencia por email: {str(qe)}")
 
             # Insertar nuevo registro (no upsert)
+            evaluation_logger.log_task_progress(
+                "Crear Candidato",
+                f"Insertando candidato nuevo en Supabase: {json.dumps(_summarize_candidate_payload(payload), ensure_ascii=False)}",
+            )
             response = supabase.table("candidates").insert(payload).execute()
         else:
             # Email ausente o inválido → se permite dar de alta igual
+            evaluation_logger.log_task_progress(
+                "Crear Candidato",
+                f"Insertando candidato nuevo sin email valido en Supabase: {json.dumps(_summarize_candidate_payload(payload), ensure_ascii=False)}",
+            )
             response = supabase.table("candidates").insert(payload).execute()
 
         # Si el candidato fue creado exitosamente y se proporcionaron user_id y client_id,
         # crear registro en candidate_recruiters
         candidate_id = None
+        response_rows_count = len(response.data) if getattr(response, "data", None) else 0
+        evaluation_logger.log_task_progress(
+            "Crear Candidato",
+            f"Respuesta insert candidates: rows={response_rows_count}",
+        )
         if response.data and len(response.data) > 0:
             candidate_id = response.data[0].get("id")
+            evaluation_logger.log_task_progress(
+                "Crear Candidato",
+                f"Candidate insert confirmado: candidate_id={candidate_id}, email={response.data[0].get('email')}",
+            )
+        if not candidate_id:
+            error_msg = "Insert ejecutado pero Supabase no retorno un candidato con id"
+            evaluation_logger.log_error("Crear Candidato", error_msg)
+            return json.dumps(
+                {"success": False, "action": "created", "candidate_created": False, "error": error_msg},
+                indent=2,
+                ensure_ascii=False,
+            )
 
-            if candidate_id and user_id and client_id:
+            if False:
                 try:
                     # Insertar en candidate_recruiters
                     recruiter_data = {"candidate_id": candidate_id, "user_id": user_id, "client_id": client_id}
@@ -1808,6 +1995,8 @@ def create_candidate(
                     )
                     print(f"⚠️ Error creando registro en candidate_recruiters: {str(recruiter_error)}")
 
+        recruiter_link = _create_candidate_recruiter_link(candidate_id)
+
         evaluation_logger.log_task_complete("Crear Candidato", "Registro creado/actualizado en candidates")
 
         # Indexar candidato en knowledge base (indexación incremental)
@@ -1825,7 +2014,13 @@ def create_candidate(
                 evaluation_logger.log_error("Crear Candidato", f"Error indexando candidato: {str(index_error)}")
 
         return json.dumps(
-            {"success": True, "action": "upsert" if email else "insert", "data": response.data},
+            {
+                "success": True,
+                "action": "created",
+                "candidate_created": True,
+                "data": response.data,
+                "candidate_recruiter_link": recruiter_link,
+            },
             indent=2,
             ensure_ascii=False,
         )
