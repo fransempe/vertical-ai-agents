@@ -56,7 +56,8 @@ def create_cv_analyzer_agent():
         - work_experience: Array de objetos con experiencia laboral desde la más reciente hasta la más antigua
         - industries_and_sectors: Array de objetos con rubros/industrias ordenados por tiempo de experiencia
         - languages: Array de objetos con idiomas y sus niveles de competencia
-        - certifications_and_courses: Array de objetos con certificaciones y cursos
+        - education: Array de objetos con educacion y formacion academica o profesional formal
+        - certifications_and_courses: Array de objetos con certificaciones y cursos no academicos
         - role_profile: Objeto con:
           - role: Rol exacto del candidato según el CV (ej: "Desarrollador Frontend", "Backend Engineer", etc.)
           - profile: Categoría UI (exactamente uno de: "Frontend"|"Backend"|"Fullstack"|"UX/UI"|"QA"|"Team Manager"|"Otro")
@@ -68,6 +69,7 @@ def create_cv_analyzer_agent():
         Nunca inventes valores; si no se detecta nada, devolvé 'Otro'.
 
         IMPORTANTE: 
+        - Toda la educacion y formacion del CV debe ir en `observations.education`, no mezclada en `other`
         - Si algún dato no está presente en el CV, usa arrays vacíos [] o null según corresponda
         - Para nombres, extraes el nombre completo tal como aparece
         - Para tech_stack, incluyes EXCLUSIVAMENTE lo detectado en `extracted_hints.technologies_found`

@@ -1681,6 +1681,7 @@ def create_candidate(
               "work_experience": [...],
               "industries_and_sectors": [...],
               "languages": [...],
+              "education": [...],
               "certifications_and_courses": [...],
               "other": "..."
             } (opcional)

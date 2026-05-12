@@ -1,5 +1,6 @@
 """POST /read-cv con crew y threadpool mockeados."""
 
+import json
 import re
 
 import pytest
@@ -48,7 +49,9 @@ class _FakeCrewCandidatePayload:
         return (
             '{"candidate_payload": {"name": "Nueva Persona", "email": "nueva@test.example", '
             '"phone": "123", "linkedin": null, "cv_url": "https://cv.example/nueva.pdf", '
-            '"tech_stack": ["Python"], "observations": {"languages": []}}}'
+            '"tech_stack": ["Python"], "observations": {"languages": [], '
+            '"education": [{"institution": "UBA", "degree": "Ingenieria", "field": "Sistemas", '
+            '"period": "2018 - 2023", "status": "completed", "details": []}]}}}'
         )
 
 
@@ -221,6 +224,7 @@ def test_read_cv_creates_candidate_from_candidate_payload(monkeypatch):
     assert data.get("candidate_status") == "created"
     assert captured["email"] == "nueva@test.example"
     assert captured["tech_stack"] == '["Python"]'
+    assert json.loads(captured["observations"])["education"][0]["institution"] == "UBA"
     assert captured["user_id"] == "u1"
     assert captured["client_id"] == "cl1"
 

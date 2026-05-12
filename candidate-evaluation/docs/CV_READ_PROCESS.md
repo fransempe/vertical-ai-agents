@@ -17,7 +17,7 @@ Este documento describe el flujo de `POST /read-cv`, la extraccion del CV y la c
    - AWS Textract OCR
 8. Si el documento es escaneado o imagen, Textract funciona como fallback OCR. El modo actual es sincronico y queda limitado a 5 MB.
 9. Con el texto extraido, el agente llama `extract_candidate_data` para obtener hints deterministas: emails, telefonos, LinkedIn, tecnologias, rol y perfil sugerido.
-10. El agente arma el candidato final y el JSON de `observations`, incluyendo experiencia laboral, rubros, idiomas, certificaciones, cursos, rol/perfil y datos adicionales.
+10. El agente arma el candidato final y el JSON de `observations`, incluyendo experiencia laboral, rubros, idiomas, educacion/formacion, certificaciones, cursos, rol/perfil y datos adicionales.
 11. El agente llama `create_candidate`.
 12. `create_candidate` normaliza `tech_stack` y parsea `observations`.
 13. Si el email no existe, inserta el registro y devuelve `action: "created"`.
@@ -47,7 +47,7 @@ La actualizacion es conservadora:
 - Para PDFs grandes o multipagina escaneados, usar Textract asincronico con S3 (`StartDocumentTextDetection`) en lugar de `DetectDocumentText`.
 - Guardar `raw_text_by_page`, metodo usado por pagina, errores y warnings de extraccion.
 - Validar el resultado estructurado con Pydantic antes de crear/actualizar el candidato.
-- Ampliar `observations` con `education`, `projects`, `seniority_estimate`, `total_experience_months`, `current_position`, `current_company`, `location`, `availability`, `portfolio_url`, `github_url`, `personal_website`, `source_language` y `extraction_confidence`.
+- Ampliar `observations` con `projects`, `seniority_estimate`, `total_experience_months`, `current_position`, `current_company`, `location`, `availability`, `portfolio_url`, `github_url`, `personal_website`, `source_language` y `extraction_confidence`.
 - Normalizar tecnologias contra un catalogo de aliases y guardar evidencia de aparicion.
 
 ## Tests y cobertura
