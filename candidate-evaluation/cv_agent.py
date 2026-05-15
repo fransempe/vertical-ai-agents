@@ -10,7 +10,6 @@ from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 
 from tools.cv_tools import download_cv_from_s3, extract_candidate_data
-from tools.supabase_tools import create_candidate
 
 load_dotenv()
 AWS_S3_URL = os.getenv("AWS_S3_URL", "")
@@ -57,7 +56,8 @@ def create_cv_analyzer_agent():
         - work_experience: Array de objetos con experiencia laboral desde la más reciente hasta la más antigua
         - industries_and_sectors: Array de objetos con rubros/industrias ordenados por tiempo de experiencia
         - languages: Array de objetos con idiomas y sus niveles de competencia
-        - certifications_and_courses: Array de objetos con certificaciones y cursos
+        - education: Array de objetos con educacion y formacion academica o profesional formal
+        - certifications_and_courses: Array de objetos con certificaciones y cursos no academicos
         - role_profile: Objeto con:
           - role: Rol exacto del candidato según el CV (ej: "Desarrollador Frontend", "Backend Engineer", etc.)
           - profile: Categoría UI (exactamente uno de: "Frontend"|"Backend"|"Fullstack"|"UX/UI"|"QA"|"Team Manager"|"Otro")
@@ -69,6 +69,7 @@ def create_cv_analyzer_agent():
         Nunca inventes valores; si no se detecta nada, devolvé 'Otro'.
 
         IMPORTANTE: 
+        - Toda la educacion y formacion del CV debe ir en `observations.education`, no mezclada en `other`
         - Si algún dato no está presente en el CV, usa arrays vacíos [] o null según corresponda
         - Para nombres, extraes el nombre completo tal como aparece
         - Para tech_stack, incluyes EXCLUSIVAMENTE lo detectado en `extracted_hints.technologies_found`
@@ -86,7 +87,7 @@ def create_cv_analyzer_agent():
         - Construye la URL del CV con el bucket y región configurados en el entorno (AWS_BUCKET_NAME, S3_REGION): "{cv_url_base}/{{nombre_archivo}}"
         - Ejemplo: para archivo "cv_juan.pdf" → "{cv_url_base}/cv_juan.pdf"
         """,
-        tools=[download_cv_from_s3, extract_candidate_data, create_candidate],
+        tools=[download_cv_from_s3, extract_candidate_data],
         verbose=True,
         llm=llm,
     )

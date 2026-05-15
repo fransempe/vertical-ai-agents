@@ -104,7 +104,9 @@ def generate_elevenlabs_prompt_from_jd(interview_name: str, job_description: str
 Búsqueda: {interview_name}
 
 Descripción del puesto:
-{job_description}""",
+{job_description}
+
+Reglas de voz (obligatorio): hablar en español; no traducir nombres propios de personas ni términos técnicos (React JS, Node JS, SQL, etc.) — decirlos en inglés tal cual. Entrevista técnica solo de teoría, sin ejercicios de código ni SQL; el candidato responde siempre de forma verbal.""",
             "cliente": {"nombre": "", "responsable": "", "email": sender_email, "telefono": ""},
             "agent_name": interview_name,
         }
@@ -121,7 +123,9 @@ Descripción del puesto:
 Búsqueda: {interview_name}
 
 Descripción del puesto:
-{job_description}""",
+{job_description}
+
+Reglas de voz (obligatorio): hablar en español; no traducir nombres propios de personas ni términos técnicos (React JS, Node JS, SQL, etc.) — decirlos en inglés tal cual. Entrevista técnica solo de teoría, sin ejercicios de código ni SQL; el candidato responde siempre de forma verbal.""",
             "cliente": {"nombre": "", "responsable": "", "email": sender_email, "telefono": ""},
             "agent_name": interview_name,
         }

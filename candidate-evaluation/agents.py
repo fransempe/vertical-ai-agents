@@ -359,7 +359,11 @@ def create_elevenlabs_prompt_generator_agent():
         - Especifique las tecnologías y conocimientos técnicos a evaluar
         - Proporcione contexto sobre el puesto y sus responsabilidades
         - Establezca el tono y estilo de la entrevista
-        - Sea conciso pero completo, sin incluir la estructura de preguntas (eso se agregará después)
+        - Incluya reglas operativas para voz: nombres propios y términos técnicos en inglés tal cual (sin traducir ni
+          "castellanizar" salvo petición explícita del candidato); entrevista técnica solo de teoría, sin ejercicios de
+          código ni SQL, con respuestas siempre verbales
+        - Sea conciso pero completo; la estructura y cantidad de preguntas la fija la tarea que recibes, pero el texto
+          final para ElevenLabs debe incorporar esas reglas de pronunciación y de modo teórico/verbal
         
         El prompt debe estar en español y ser específico para la búsqueda, sin ser genérico.""",
         verbose=False,

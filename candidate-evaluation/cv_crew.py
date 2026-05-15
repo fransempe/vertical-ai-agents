@@ -51,7 +51,8 @@ def create_cv_analysis_crew(filename: str, user_id: str = None, client_id: str =
              * work_experience: Array de objetos con experiencia laboral desde la más reciente hasta la más antigua. Cada objeto debe tener: company (empresa), position (cargo), period (período en formato "MM/YYYY - MM/YYYY" o "MM/YYYY - Present"), duration_months (duración aproximada en meses), responsibilities (array de responsabilidades principales)
              * industries_and_sectors: Array de objetos con rubros/industrias ordenados por tiempo de experiencia (de mayor a menor). Cada objeto debe tener: industry (nombre del rubro), experience_months (tiempo aproximado en meses)
              * languages: Array de objetos con idiomas y sus niveles. Cada objeto debe tener: language (nombre del idioma), level (nivel: "basic", "intermediate", "advanced", "native", etc.)
-             * certifications_and_courses: Array de objetos con certificaciones y cursos. Cada objeto debe tener: name (nombre), issuer (institución/emisor), date (fecha si está disponible), type ("certification" o "course")
+             * education: Array de objetos con educacion y formacion academica o profesional formal. Cada objeto debe tener: institution (institucion), degree (titulo/carrera/formacion), field (area de estudio o null), period (periodo si esta disponible), status ("completed", "in_progress", "unfinished" o null), details (array con detalles relevantes)
+             * certifications_and_courses: Array de objetos con certificaciones y cursos no academicos. Cada objeto debe tener: name (nombre), issuer (institución/emisor), date (fecha si está disponible), type ("certification" o "course")
              * role_profile: Objeto con:
                - role: Rol exacto del candidato según el CV (ej: "Desarrollador Frontend", "Backend Engineer", etc.)
                - profile: Categoría para UI (debe ser exactamente uno de: "Frontend"|"Backend"|"Fullstack"|"UX/UI"|"QA"|"Team Manager"|"Otro")
@@ -87,6 +88,17 @@ def create_cv_analysis_crew(filename: str, user_id: str = None, client_id: str =
                }},
                ...
              ],
+             "education": [
+               {{
+                 "institution": "Institucion educativa",
+                 "degree": "Titulo, carrera o formacion",
+                 "field": "Area de estudio o null",
+                 "period": "MM/YYYY - MM/YYYY, YYYY - YYYY o null",
+                 "status": "completed|in_progress|unfinished|null",
+                 "details": ["detalle relevante 1", "detalle relevante 2", ...]
+               }},
+               ...
+             ],
              "certifications_and_courses": [
                {{
                  "name": "Nombre del curso/certificación",
@@ -101,16 +113,40 @@ def create_cv_analysis_crew(filename: str, user_id: str = None, client_id: str =
            
            IMPORTANTE: El JSON debe ser válido y estar correctamente formateado. Si algún campo no tiene información, usa un array vacío [] o null según corresponda.
            
-        7. Crea o actualiza el candidato en la tabla 'candidates' usando la herramienta create_candidate, con los campos:
+        7. Prepara un JSON `candidate_payload` para que la API cree o actualice el candidato en la tabla 'candidates', con los campos:
            - name, email, phone, linkedin (si está disponible), tech_stack (array)
            - observations: El JSON string con toda la información adicional extraída (debe ser un JSON válido)
            - cv_url: Construir como "{cv_url_base}/{filename}"
            {f" - user_id: {user_id}, client_id: {client_id} (IMPORTANTE: incluir estos parámetros si están disponibles)" if user_id and client_id else ""}
-        8. Confirma el resultado del upsert devolviendo el ID o el registro creado
+        8. NO crees el candidato. Tu responsabilidad termina en devolver el JSON `candidate_payload`.
+           La API se encargara de llamar a create_candidate de forma deterministica.
         
         FORMATO DE SALIDA REQUERIDO:
         Debes retornar la información en el siguiente formato estructurado:
         
+        JSON PARA CREACION:
+        ------------------
+        Incluye exactamente un objeto JSON parseable con esta forma:
+        {{
+          "candidate_payload": {{
+            "name": "...",
+            "email": "...",
+            "phone": "...",
+            "linkedin": null,
+            "cv_url": "{cv_url_base}/{filename}",
+            "tech_stack": ["..."],
+            "observations": {{
+              "role_profile": {{"role": "...", "profile": "..."}},
+              "work_experience": [],
+              "industries_and_sectors": [],
+              "languages": [],
+              "education": [],
+              "certifications_and_courses": [],
+              "other": null
+            }}
+          }}
+        }}
+
         ========================================
         ANÁLISIS DE CV - {filename}
         ========================================
@@ -128,7 +164,7 @@ def create_cv_analysis_crew(filename: str, user_id: str = None, client_id: str =
         
         📝 OBSERVACIONES (Información Adicional en JSON):
         -------------------------------------------------
-        [JSON string con la estructura: role_profile, work_experience, industries_and_sectors, languages, certifications_and_courses, other]
+        [JSON string con la estructura: role_profile, work_experience, industries_and_sectors, languages, education, certifications_and_courses, other]
         
         ========================================
         
@@ -141,6 +177,7 @@ def create_cv_analysis_crew(filename: str, user_id: str = None, client_id: str =
         - No inventes información que no esté en el CV
         - Extrae los datos exactamente como aparecen en el documento
         - Para experiencia laboral, ordénala desde la más reciente hasta la más antigua
+        - Para education, extrae toda la educacion y formacion academica/profesional formal; no la mezcles en other
         - Para rubros, ordénalos por tiempo de experiencia aproximado (de mayor a menor)
         - Si no hay información para alguna sección, usa un array vacío [] o null
         
@@ -168,10 +205,12 @@ def create_cv_analysis_crew(filename: str, user_id: str = None, client_id: str =
             "work_experience": [...],
             "industries_and_sectors": [...],
             "languages": [...],
+            "education": [...],
             "certifications_and_courses": [...],
             "other": "..."
           }
         - Resultado de creación/actualización en Supabase (candidates)
+        - JSON exacto con `candidate_payload`, para que la API cree o actualice el candidato
         Todo presentado de forma clara y legible, con el JSON de observations correctamente formateado
         """,
         agent=cv_analyzer,
