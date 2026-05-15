@@ -1028,6 +1028,18 @@ def create_elevenlabs_prompt_generation_task(agent, interview_name: str, job_des
            - Proporcione contexto sobre el puesto y sus responsabilidades
            - Establezca el tono profesional pero amigable
            - Sea específico para esta búsqueda, no genérico
+           - Incluya una sección explícita **Idioma y pronunciación (obligatorio)** en el texto del prompt para ElevenLabs, con reglas como:
+             - Hablar en español de forma natural.
+             - NO traducir nombres propios de personas (p. ej. William, John): decirlos exactamente como en inglés.
+             - NO traducir ni adaptar marcas, frameworks, lenguajes ni siglas técnicas: decirlos en inglés tal cual
+               (p. ej. React, React JS, Node, Node JS, JavaScript, TypeScript, SQL, API, JSON, HTML, CSS, Git, Docker,
+               Kubernetes, AWS, GCP), sin "explicar el equivalente en español" salvo que el candidato lo pida.
+           - Incluya una sección explícita **Modo de entrevista técnica (obligatorio)** en el texto del prompt para ElevenLabs, con reglas como:
+             - Las preguntas técnicas son de teoría y conceptos (definiciones, trade-offs, cuándo usar qué, errores comunes, etc.).
+             - NO pedir ejercicios prácticos de código, escribir queries SQL, pseudocódigo largo, completar código,
+               depurar snippets ni "pruebas tipo examen" con código.
+             - El candidato responde siempre de forma verbal (hablada); si intenta escribir o dictar código como tarea,
+               redirigir con cordialidad a una respuesta hablada sin código.
            - Incluya de forma EXPLÍCITA la estructura de preguntas que debe seguir el agente de voz:
              
              1. **1 PREGUNTA DE RESPONSABILIDADES EN EXPERIENCIA LABORAL:**
@@ -1058,6 +1070,8 @@ def create_elevenlabs_prompt_generation_task(agent, interview_name: str, job_des
                 - NO hagas más de 1 pregunta sobre la experiencia del candidato.
                 - NO hagas más de 1 pregunta de habilidades blandas.
                 - Haz como mínimo 10 y como máximo 15 preguntas técnicas. NO hagas menos de 10 ni más de 15.
+                - Las preguntas técnicas deben ser solo de teoría: jamás pedir que el candidato "escriba" SQL, código o
+                  ejercicios prácticos; las respuestas deben poder darse hablando.
                 - Hacé EXACTAMENTE 3 preguntas en inglés, elegidas de forma random del banco indicado. NO hagas más ni menos que 3.
                 - En total deben ser entre 15 y 20 preguntas evaluativas (1 experiencia, 1 soft skill, 10 a 15 técnicas, 3 inglés).
                 - Al finalizar las preguntas evaluativas, el agente debe agradecer al candidato y cerrar la entrevista de forma cordial.
@@ -1067,6 +1081,8 @@ def create_elevenlabs_prompt_generation_task(agent, interview_name: str, job_des
            - Estar en español
            - Ser conciso pero completo
            - Incluir las reglas anteriores sobre la cantidad y tipo de preguntas
+           - Incluir las secciones obligatorias de pronunciación (nombres y términos técnicos en inglés tal cual) y de
+             entrevista teórica verbal (sin ejercicios de código/SQL)
            - Enfocarse en definir el rol, el contexto del entrevistador y la estructura de la entrevista (15 a 20 preguntas evaluativas en total)
         
         **INSTRUCCIONES PARA EXTRACCIÓN DE DATOS DEL CLIENTE:**
